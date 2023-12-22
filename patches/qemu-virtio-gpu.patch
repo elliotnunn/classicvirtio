@@ -1,0 +1,17 @@
+--- a/hw/ppc/Kconfig
++++ b/hw/ppc/Kconfig
+@@ -109,2 +109,3 @@ config MAC_OLDWORLD
+     select FW_CFG_PPC
++    select VIRTIO_VGA
+
+@@ -121,2 +122,3 @@ config MAC_NEWWORLD
+     select FW_CFG_PPC
++    select VIRTIO_VGA
+
+
+--- a/hw/m68k/Kconfig
++++ b/hw/m68k/Kconfig
+@@ -20,2 +20,3 @@ config Q800
+     select MACFB
++    select VIRTIO_GPU
+     select SWIM
