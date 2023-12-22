@@ -87,8 +87,8 @@ build/ndrv/%.o: %.c
 
 # GNU LD is just too fiddly to call directly
 NDRVDYLIBS = StdCLib DriverServicesLib MathLib NameRegistryLib PCILib VideoServicesLib InterfaceLib ControlsLib
-build/ndrv/ndrv-%.elf: build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
+build/ndrv/ndrv-%.so: build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
 	powerpc-apple-macos-gcc -shared -Wl,--gc-sections -Wl,-bE:ndrv.exp -o $@ $^ $(patsubst %,-l%,$(NDRVDYLIBS))
 
-build/ndrv/ndrv-%: build/ndrv/ndrv-%.elf
+build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 	MakePEF -o $@ $^
