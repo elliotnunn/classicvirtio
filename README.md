@@ -22,7 +22,7 @@ Then:
 # Command-line args for qemu-system-ppc
 
 	-device loader,addr=0x4000000,file=/PATH/TO/classicvirtio/build/ndrv/ndrvloader
-	-prom-env="boot-command=init-program go"
+	-prom-env "boot-command=init-program go"
 
 # Command-line args for qemu-system-m68k
 
