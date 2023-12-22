@@ -1,0 +1,21 @@
+--- a/drivers/pci_database.c
++++ b/drivers/pci_database.c
+@@ -248,12 +248,18 @@ static const pci_dev_t vga_devices[] = {
+     {
+         PCI_VENDOR_ID_QEMU, PCI_DEVICE_ID_QEMU_VGA,
+         NULL, "QEMU,VGA", "QEMU VGA",    "VGA\0",
+         0, 0, 0,
+         NULL, NULL,
+     },
++    {
++        0x1af4, 0x1050,
++        NULL, "VirtioGPU","Virtio GPU",  "VGA\0",
++        0, 0, 0,
++        NULL, NULL,
++    },
+     {
+         0xFFFF, 0xFFFF,
+         NULL, NULL, NULL, NULL,
+         -1, -1, -1,
+         NULL, NULL,
+     },

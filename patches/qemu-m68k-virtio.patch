@@ -1,0 +1,161 @@
+--- a/hw/nubus/meson.build
++++ b/hw/nubus/meson.build
+@@ -4,2 +4,3 @@ nubus_ss.add(files('nubus-bus.c'))
+ nubus_ss.add(files('nubus-bridge.c'))
++nubus_ss.add(files('nubus-virtio-mmio.c'))
+ nubus_ss.add(when: 'CONFIG_Q800', if_true: files('mac-nubus-bridge.c'))
+
+
+--- /dev/null
++++ b/hw/nubus/nubus-virtio-mmio.c
+@@ -0,0 +1,107 @@
++/*
++ * QEMU Macintosh Nubus Virtio MMIO card
++ *
++ * Copyright (c) 2023 Mark Cave-Ayland <mark.cave-ayland@ilande.co.uk>
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2 or later.
++ * See the COPYING file in the top-level directory.
++ *
++ */
++
++#include "qemu/osdep.h"
++#include "hw/nubus/nubus-virtio-mmio.h"
++
++
++#define NUBUS_VIRTIO_MMIO_PIC_OFFSET   0
++#define NUBUS_VIRTIO_MMIO_DEV_OFFSET   0x200
++
++
++static void nubus_virtio_mmio_set_input_irq(void *opaque, int n, int level)
++{
++    NubusDevice *nd = NUBUS_DEVICE(opaque);
++
++    nubus_set_irq(nd, level);
++}
++
++static void nubus_virtio_mmio_realize(DeviceState *dev, Error **errp)
++{
++    NubusVirtioMMIODeviceClass *nvmdc = NUBUS_VIRTIO_MMIO_GET_CLASS(dev);
++    NubusVirtioMMIO *s = NUBUS_VIRTIO_MMIO(dev);
++    NubusDevice *nd = NUBUS_DEVICE(dev);
++    SysBusDevice *sbd;
++    int i, offset;
++
++    nvmdc->parent_realize(dev, errp);
++    if (*errp) {
++        return;
++    }
++
++    /* Goldfish PIC */
++    sbd = SYS_BUS_DEVICE(&s->pic);
++    if (!sysbus_realize(sbd, errp)) {
++        return;
++    }
++    memory_region_add_subregion(&nd->slot_mem, NUBUS_VIRTIO_MMIO_PIC_OFFSET,
++                                sysbus_mmio_get_region(sbd, 0));
++    sysbus_connect_irq(sbd, 0,
++                       qdev_get_gpio_in_named(dev, "pic-input-irq", 0));
++
++    /* virtio-mmio devices */
++    offset = NUBUS_VIRTIO_MMIO_DEV_OFFSET;
++    for (i = 0; i < NUBUS_VIRTIO_MMIO_NUM_DEVICES; i++) {
++        sbd = SYS_BUS_DEVICE(&s->virtio_mmio[i]);
++        qdev_prop_set_bit(DEVICE(sbd), "force-legacy", false);
++        if (!sysbus_realize_and_unref(sbd, errp)) {
++            return;
++        }
++
++        memory_region_add_subregion(&nd->slot_mem, offset,
++                                    sysbus_mmio_get_region(sbd, 0));
++        offset += 0x200;
++
++        sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(DEVICE(&s->pic), i));
++    }
++}
++
++static void nubus_virtio_mmio_init(Object *obj)
++{
++    NubusVirtioMMIO *s = NUBUS_VIRTIO_MMIO(obj);
++    int i;
++
++    object_initialize_child(obj, "pic", &s->pic, TYPE_GOLDFISH_PIC);
++    for (i = 0; i < NUBUS_VIRTIO_MMIO_NUM_DEVICES; i++) {
++        char *name = g_strdup_printf("virtio-mmio[%d]", i);
++        object_initialize_child(obj, name, &s->virtio_mmio[i],
++                                TYPE_VIRTIO_MMIO);
++        g_free(name);
++    }
++
++    /* Input from goldfish PIC */
++    qdev_init_gpio_in_named(DEVICE(obj), nubus_virtio_mmio_set_input_irq,
++                            "pic-input-irq", 1);
++}
++
++static void nubus_virtio_mmio_class_init(ObjectClass *oc, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(oc);
++    NubusVirtioMMIODeviceClass *nvmdc = NUBUS_VIRTIO_MMIO_CLASS(oc);
++
++    device_class_set_parent_realize(dc, nubus_virtio_mmio_realize,
++                                    &nvmdc->parent_realize);
++}
++
++static const TypeInfo nubus_virtio_mmio_type_info = {
++    .name = TYPE_NUBUS_VIRTIO_MMIO,
++    .parent = TYPE_NUBUS_DEVICE,
++    .instance_init = nubus_virtio_mmio_init,
++    .instance_size = sizeof(NubusVirtioMMIO),
++    .class_init = nubus_virtio_mmio_class_init,
++    .class_size = sizeof(NubusVirtioMMIODeviceClass),
++};
++
++static void nubus_virtio_mmio_register_types(void)
++{
++    type_register_static(&nubus_virtio_mmio_type_info);
++}
++
++type_init(nubus_virtio_mmio_register_types)
+
+
+--- /dev/null
++++ b/include/hw/nubus/nubus-virtio-mmio.h
+@@ -0,0 +1,38 @@
++/*
++ * QEMU Macintosh Nubus Virtio MMIO card
++ *
++ * Copyright (c) 2023 Mark Cave-Ayland <mark.cave-ayland@ilande.co.uk>
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2 or later.
++ * See the COPYING file in the top-level directory.
++ *
++ */
++
++#ifndef HW_NUBUS_VIRTIO_MMIO_H
++#define HW_NUBUS_VIRTIO_MMIO_H
++
++#include "hw/nubus/nubus.h"
++#include "qom/object.h"
++#include "hw/intc/goldfish_pic.h"
++#include "hw/virtio/virtio-mmio.h"
++
++#define TYPE_NUBUS_VIRTIO_MMIO "nubus-virtio-mmio"
++OBJECT_DECLARE_TYPE(NubusVirtioMMIO, NubusVirtioMMIODeviceClass,
++                    NUBUS_VIRTIO_MMIO)
++
++struct NubusVirtioMMIODeviceClass {
++    DeviceClass parent_class;
++
++    DeviceRealize parent_realize;
++};
++
++#define NUBUS_VIRTIO_MMIO_NUM_DEVICES 32
++
++struct NubusVirtioMMIO {
++    NubusDevice parent_obj;
++
++    GoldfishPICState pic;
++    VirtIOMMIOProxy virtio_mmio[NUBUS_VIRTIO_MMIO_NUM_DEVICES];
++};
++
++#endif
