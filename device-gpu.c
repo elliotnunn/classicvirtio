@@ -330,7 +330,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		logenable = 1;
+// 		logenable = 1;
 // 	}
 
 	printf("Starting\n");
