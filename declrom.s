@@ -274,6 +274,11 @@ DriverInput:
 	.align 2
 9$:
 
+/* Pad so that, after the header, this ROM is a multiple of 4K */
+/* Works around a suspected QEMU bug: */
+/* Assertion failed: (!(iotlb & ~TARGET_PAGE_MASK)), function tlb_set_page_full */
+	.org ((.+0xfff+0x14)&~0xfff)-0x14
+
 /* Header, with magic number, must go at the end */
 	.long (sResourceDirectory-.) & 0xffffff
 	.long ROMEND-ROMSTART
