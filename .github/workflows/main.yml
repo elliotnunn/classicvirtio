@@ -1,0 +1,58 @@
+name: Build Classic Virtio drivers
+
+on:
+  push:
+    # Build for non-release tags only
+    branches:
+      - "**"
+    tags:
+      - "!v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Classic Virtio drivers build
+    container:
+      image: ghcr.io/autc04/retro68
+      env:
+        INTERFACES: universal
+        INTERFACESFILE: "${{ secrets.INTERFACESFILE }}"
+    steps:
+      - name: Checkout Classic Virtio drivers
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: apt-get -y update && apt-get install lua5.3 xxd
+
+      - name: Configure Interfaces
+        run: /Retro68-build/bin/docker-entrypoint.sh
+
+      - name: Build drivers
+        run: make
+
+      - name: Store artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: classicvirtio-drivers-latest
+          path: |
+            build/classic/declrom
+            build/ndrv/ndrvloader
+
+      - name: Prepare pre-release from artifacts
+        uses: actions/download-artifact@v2
+        with:
+          name: classicvirtio-drivers-latest
+          path: archive
+
+      - name: Archive pre-release
+        run: cd archive && zip -r ../classicvirtio-drivers-latest.zip .
+
+      - name: Upload pre-release
+        if: "${{ github.ref_name == 'main' }}"
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: true
+          automatic_release_tag: "latest"
+          title: "Development Build"
+          files: classicvirtio-drivers-latest.zip
