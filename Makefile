@@ -36,7 +36,7 @@ build/classic/declrom: declrom.s \
 	m68k-apple-macos-as -o build/classic/declrom.o declrom.s
 	m68k-apple-macos-ld -o build/classic/declrom.elf build/classic/declrom.o
 	m68k-apple-macos-objcopy -O binary -j .text build/classic/declrom.elf $@
-	scripts/calculate_crc.lua $@ $@
+	python3 scripts/calculatecrc.py $@
 
 # The "slotexec" helper functions are also needed in the declaration ROM,
 # but are built using different compiler options (PC-relative addressing FYI)
@@ -69,7 +69,10 @@ build/classic/drvr.o: drvr.s
 # Append a list of "relocations" (i.e. pointer offsets) to be "fixed up" at runtime.
 build/classic/drvr-%: build/classic/drvr-%.elf
 	m68k-apple-macos-objcopy -O binary -j .drvr $^ $@
-	(m68k-apple-macos-objdump -r $^ | fgrep R_68K_32; echo 00000000) | cut -w -f1 | xxd -r -p >>$@
+	(m68k-apple-macos-objdump -r $^ | fgrep R_68K_32; echo 00000000) \
+		| cut -w -f1 \
+		| python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' \
+		>>$@
 
 ############################# POWERPC NDRV #############################
 

@@ -21,9 +21,6 @@ jobs:
       - name: Checkout Classic Virtio drivers
         uses: actions/checkout@v2
 
-      - name: Install dependencies
-        run: apt-get -y update && apt-get install lua5.3 xxd
-
       - name: Configure Interfaces
         run: /Retro68-build/bin/docker-entrypoint.sh
 
