@@ -70,7 +70,7 @@ build/classic/drvr.o: drvr.s
 build/classic/drvr-%: build/classic/drvr-%.elf
 	m68k-apple-macos-objcopy -O binary -j .drvr $^ $@
 	(m68k-apple-macos-objdump -r $^ | fgrep R_68K_32; echo 00000000) \
-		| cut -w -f1 \
+		| cut -d ' ' -f1 \
 		| python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' \
 		>>$@
 
