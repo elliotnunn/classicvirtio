@@ -12,6 +12,12 @@ maintain a giant hash table of (CNID) -> (parent's CNID, name) mappings.
 
 The "File System Manager" (a convenience layer on top of the File Manager) is
 not used because it is unavailable at the start of the boot process.
+
+9P FID allocation:
+0-31 are auto-closed by 9p.c when re-use is attempted
+0 root
+1-7 misc use by various functions in this file
+8-15 multifork file access layer
 */
 
 #include <Disks.h>
@@ -59,7 +65,12 @@ enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
 	// so if the dispatch mechanism changes, this constant must change:
 	FSID = ('9'<<8) | 'p',
-	ROOTFID = 2,
+	ROOTFID = 0,
+	FID1 = 1,
+	FID2 = 2,
+	FID3 = 3,
+	FIDPERSIST = 4,
+	FIDBROWSE = 5,
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 64 * 1024, // large stack bc memory is so hard to allocate
@@ -359,7 +370,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	installDrive();
 
-	int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
+	int32_t systemFolder = browse(FID1, 2 /*cnid*/, "\pSystem Folder");
 	vcb.vcbFndrInfo[0] = systemFolder>0 ? systemFolder : 0;
 	printf("System Folder: %s\n", systemFolder>0 ? "present" : "absent");
 
@@ -612,8 +623,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
-	enum {MYFID = 9};
-
 	// Allow working directories to pretend to be disks
 	int32_t cnid = 2;
 	if (pb->ioVRefNum <= WDHI) {
@@ -624,13 +633,13 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 	// Count contained files
 	pb->ioVNmFls = 0;
 
-	int err = browse(MYFID, cnid, "");
+	int err = browse(FID1, cnid, "");
 	if (err < 0) return err;
 
-	if (Lopen9(MYFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
+	if (Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
 
 	char scratch[4096];
-	InitReaddir9(MYFID, scratch, sizeof scratch);
+	InitReaddir9(FID1, scratch, sizeof scratch);
 
 	char type;
 	char childname[512];
@@ -674,8 +683,6 @@ static OSErr fsGetVolParms(struct HIOParam *pb) {
 // <--    104   ioFlClpSiz     long word
 
 static OSErr fsGetFileInfo(struct HFileInfo *pb) {
-	enum {MYFID=3};
-
 	bool catalogCall = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
 
 	int idx = pb->ioFDirIndex;
@@ -692,15 +699,14 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		static char scratch[2048];
 		static long lastCNID;
 		static int lastIdx;
-		enum {LISTFID=22};
 
 		// Invalidate the cache (by setting lastCNID to 0)
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			if (iserr(browse(LISTFID, cnid, ""))) return fnfErr;
-			if (Lopen9(LISTFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
-			InitReaddir9(LISTFID, scratch, sizeof scratch);
+			if (iserr(browse(FIDPERSIST, cnid, ""))) return fnfErr;
+			if (Lopen9(FIDPERSIST, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
+			InitReaddir9(FIDPERSIST, scratch, sizeof scratch);
 			lastCNID = cnid;
 		}
 
@@ -715,7 +721,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 			if (err) {
 				lastCNID = 0;
-				Clunk9(LISTFID);
+				Clunk9(FIDPERSIST);
 				return fnfErr;
 			}
 
@@ -733,14 +739,14 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		setDB(childcnid, cnid, name);
 		cnid = childcnid;
 
-		browse(MYFID, cnid, "");
+		browse(FID1, cnid, "");
 	} else if (idx == 0) {
 		printf("Find by: directory+path\n");
-		cnid = browse(MYFID, cnid, pb->ioNamePtr);
+		cnid = browse(FID1, cnid, pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 	} else {
 		printf("Find by: directory only\n");
-		cnid = browse(MYFID, cnid, "\p");
+		cnid = browse(FID1, cnid, "\p");
 		if (iserr(cnid)) return cnid;
 	}
 
@@ -755,9 +761,9 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 	if (isdir(cnid)) {
 		if (!catalogCall) return fnfErr; // GetFileInfo predates directories
-		setDirPBInfo((void *)pb, cnid, MYFID);
+		setDirPBInfo((void *)pb, cnid, FID1);
 	} else {
-		setFilePBInfo((void *)pb, cnid, MYFID);
+		setFilePBInfo((void *)pb, cnid, FID1);
 	}
 
 	return noErr;
@@ -796,17 +802,17 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 	char rname[512];
 	strcpy(rname, getDBName(cnid));
 	strcat(rname, ".rsrc");
-	if (!Walk9(fid, 19, 2, (const char *[]){"..", rname}, NULL, NULL))
-		Getattr9(19, STAT_SIZE, &rstat);
+	if (!Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL))
+		Getattr9(FID1, STAT_SIZE, &rstat);
 
 	// Finder info-getting, needs to be factored out
 	struct FInfo finfo = {};
 	char iname[512];
 	strcpy(iname, getDBName(cnid));
 	strcat(iname, ".idump");
-	if (!Walk9(fid, 19, 2, (const char *[]){"..", iname}, NULL, NULL))
-		if (!Lopen9(19, O_RDONLY, NULL, NULL))
-			Read9(19, &finfo, 0, 8, NULL);
+	if (!Walk9(fid, FID1, 2, (const char *[]){"..", iname}, NULL, NULL))
+		if (!Lopen9(FID1, O_RDONLY, NULL, NULL))
+			Read9(FID1, &finfo, 0, 8, NULL);
 
 	// Determine whether the file is open
 	bool openRF = false, openDF = false;
@@ -850,20 +856,18 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 // Set creator and type on files only
 // TODO set timestamps, the attributes byte (comes with AppleDouble etc)
 static OSErr fsSetFileInfo(struct HFileInfo *pb) {
-	enum {MYFID=3};
-
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(MYFID, cnid, pb->ioNamePtr);
+	cnid = browse(FID1, cnid, pb->ioNamePtr);
 	if (cnid < 0) return cnid;
 
-	Walk9(MYFID, MYFID, 1, (const char *[]){".."}, NULL, NULL);
+	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
 
 	char iname[512];
 	sprintf(iname, "%s.idump", getDBName(cnid));
 
-	if (!Lcreate9(MYFID, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL)) {
-		Write9(MYFID, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
-		Clunk9(MYFID);
+	if (!Lcreate9(FID1, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL)) {
+		Write9(FID1, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
+		Clunk9(FID1);
 	}
 }
 
@@ -875,10 +879,10 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 	if (pb->ioTrap & 0x200) {
 		// HSetVol: any directory is fair game,
 		// so check that the path exists and is really a directory
-		int32_t cnid = browse(11, pbDirID(pb), pb->ioNamePtr);
+		int32_t cnid = browse(FID1, pbDirID(pb), pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 		if (!isdir(cnid)) return dirNFErr;
-		Clunk9(11);
+		Clunk9(FID1);
 
 		setDefVCBPtr = &vcb;
 		setDefVRefNum = vcb.vcbVRefNum;
@@ -918,7 +922,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
 
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(10, cnid, pb->ioNamePtr);
+	cnid = browse(FID1, cnid, pb->ioNamePtr);
 	if (!iserr(cnid)) {
 		// The target exists
 		if (cnid == 2) {
@@ -941,7 +945,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (leaf[0] == 0) return dirNFErr;
 
 	cnid = pbDirID(pb);
-	cnid = browse(10, cnid, path);
+	cnid = browse(FID1, cnid, path);
 	if (iserr(cnid)) return dirNFErr; // return cnid;
 
 	spec->vRefNum = vcb.vcbVRefNum;
@@ -981,9 +985,9 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		sprintf(rname, "%s.rsrc", getDBName(cnid));
 
 		// Make sure the sidecar file exists
-		Walk9(fid, 10, 1, (const char *[]){".."}, NULL, NULL); // parent dir
-		Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL);
-		Clunk9(10);
+		Walk9(fid, FID1, 1, (const char *[]){".."}, NULL, NULL); // parent dir
+		Lcreate9(FID1, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL);
+		Clunk9(FID1);
 
 		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL)) return ioErr;
 		if (Getattr9(fid, 0, &stat)) return permErr;
@@ -1008,9 +1012,9 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	char iname[512];
 	strcpy(iname, getDBName(cnid));
 	strcat(iname, ".idump");
-	if (!Walk9(fid, 19, 2, (const char *[]){"..", iname}, NULL, NULL))
-		if (!Lopen9(19, O_RDONLY, NULL, NULL))
-			Read9(19, &type, 0, sizeof type, NULL);
+	if (!Walk9(fid, FID1, 2, (const char *[]){"..", iname}, NULL, NULL))
+		if (!Lopen9(FID1, O_RDONLY, NULL, NULL))
+			Read9(FID1, &type, 0, sizeof type, NULL);
 
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
@@ -1224,7 +1228,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 }
 
 static OSErr fsCreate(struct HFileParam *pb) {
-	int err = browse(10, pbDirID(pb), pb->ioNamePtr);
+	int err = browse(FID1, pbDirID(pb), pb->ioNamePtr);
 
 	if (!iserr(err)) { // actually found a file
 		return dupFNErr;
@@ -1237,7 +1241,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 
 	if (name[0] == 0) return bdNamErr;
 
-	int32_t parentCNID = browse(10, pbDirID(pb), dir);
+	int32_t parentCNID = browse(FID1, pbDirID(pb), dir);
 
 	if (iserr(parentCNID)) return dirNFErr;
 
@@ -1254,10 +1258,10 @@ static OSErr fsCreate(struct HFileParam *pb) {
 	uniname[n++] = 0;
 
 	if ((pb->ioTrap & 0xff) == (_Create & 0xff)) {
-		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, uniname, NULL, NULL) || Clunk9(10)) return ioErr;
+		if (Lcreate9(FID1, O_CREAT|O_EXCL, 0777, 0, uniname, NULL, NULL) || Clunk9(FID1)) return ioErr;
 	} else {
 		struct Qid9 qid;
-		if (Mkdir9(10, 0777, 0, uniname, &qid) || Clunk9(10)) return ioErr;
+		if (Mkdir9(FID1, 0777, 0, uniname, &qid) || Clunk9(FID1)) return ioErr;
 
 		// DirCreate returns DirID, and therefore we must put it in the database
 		int32_t cnid = qid2cnid(qid);
@@ -1269,7 +1273,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 }
 
 static OSErr fsDelete(struct IOParam *pb) {
-	int32_t cnid = browse(10, pbDirID(pb), pb->ioNamePtr);
+	int32_t cnid = browse(FID1, pbDirID(pb), pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 
 	// Do not allow removal of open files
@@ -1282,15 +1286,15 @@ static OSErr fsDelete(struct IOParam *pb) {
 	}
 
 	// This is hacky, needs to be replaced with systematic sidecar management
-	Walk9(10, 9, 1, (const char *[]){".."}, NULL, NULL);
+	Walk9(FID1, FID2, 1, (const char *[]){".."}, NULL, NULL);
 
-	if (Remove9(10)) return fBsyErr; // assume it was a full directory
+	if (Remove9(FID1)) return fBsyErr; // assume it was a full directory
 
 	const char *sidecars[] = {"%s.rsrc", "%s.idump", "._%s"};
 	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
 		char delname[512];
 		sprintf(delname, sidecars[i], getDBName(cnid));
-		Unlinkat9(9, delname, 0);
+		Unlinkat9(FID2, delname, 0);
 	}
 
 	return noErr;
@@ -1298,11 +1302,11 @@ static OSErr fsDelete(struct IOParam *pb) {
 
 // Unlike Unix rename, this is not permitted to overwrite an existing file
 static OSErr fsRename(struct IOParam *pb) {
-	enum {CHILDFID = 10, PARENTFID = 11, JUNKFID = 12};
+	enum {CHILD=FID1, PARENT=FID2, JUNK=FID3};
 	int32_t parentCNID, childCNID;
 
 	// The original file exists
-	childCNID = browse(CHILDFID, pbDirID(pb), pb->ioNamePtr);
+	childCNID = browse(CHILD, pbDirID(pb), pb->ioNamePtr);
 	if (iserr(childCNID)) return childCNID;
 	parentCNID = getDBParent(childCNID);
 
@@ -1326,12 +1330,12 @@ static OSErr fsRename(struct IOParam *pb) {
 	}
 
 	// Disallow a duplicate-looking filename
-	if (!iserr(browse(JUNKFID, parentCNID, newNameR))) return dupFNErr;
+	if (!iserr(browse(JUNK, parentCNID, newNameR))) return dupFNErr;
 
-	// Need a PARENTFID for the Trenameat call
-	Walk9(CHILDFID, PARENTFID, 1, (const char *[]){".."}, NULL, NULL);
+	// Need a PARENT for the Trenameat call
+	Walk9(CHILD, PARENT, 1, (const char *[]){".."}, NULL, NULL);
 
-	if (Renameat9(PARENTFID, oldNameU, PARENTFID, newNameU)) return ioErr;
+	if (Renameat9(PARENT, oldNameU, PARENT, newNameU)) return ioErr;
 
 	// Commit to the rename, so correct the database
 	setDB(childCNID, parentCNID, newNameU);
@@ -1343,7 +1347,7 @@ static OSErr fsRename(struct IOParam *pb) {
 		sprintf(oldSidecar, sidecars[i], oldNameU);
 		sprintf(newSidecar, sidecars[i], newNameU);
 
-		int err = Renameat9(PARENTFID, oldSidecar, PARENTFID, newSidecar);
+		int err = Renameat9(PARENT, oldSidecar, PARENT, newSidecar);
 		if (err != 0 && err != ENOENT) {
 			panic("surprising error while renaming sidecar file");
 		}
@@ -1356,7 +1360,7 @@ static OSErr fsRename(struct IOParam *pb) {
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(12, cnid, pb->ioNamePtr);
+	cnid = browse(FID1, cnid, pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 	if (!isdir(cnid)) return fnfErr;
 
@@ -1508,9 +1512,9 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 			// Exhaustive directory listing
 			char scratch[4096];
-			Walk9(tip, 27, 0, NULL, NULL, NULL); // dupe shouldn't fail
-			if (Lopen9(27, O_RDONLY|O_DIRECTORY, NULL, NULL)) return fnfErr;
-			InitReaddir9(27, scratch, sizeof scratch);
+			Walk9(tip, FIDBROWSE, 0, NULL, NULL, NULL); // dupe shouldn't fail
+			if (Lopen9(FIDBROWSE, O_RDONLY|O_DIRECTORY, NULL, NULL)) return fnfErr;
+			InitReaddir9(FIDBROWSE, scratch, sizeof scratch);
 
 			int err;
 			struct Qid9 qid;
@@ -1529,7 +1533,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 					// TODO: fuzzy filename comparison
 				}
 			}
-			Clunk9(27);
+			Clunk9(FIDBROWSE);
 
 			if (err != 0) return fnfErr;
 
