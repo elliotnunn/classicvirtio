@@ -225,5 +225,5 @@ int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret);
 int Setattr9(uint32_t fid, uint32_t request_mask, struct Stat9 to);
 int Clunk9(uint32_t fid);
 int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
-int Write9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
+int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 void QueueNotified9(void);

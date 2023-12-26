@@ -344,7 +344,7 @@ int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *ac
 		actual_count, buf, count);
 }
 
-int Write9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	enum {Twrite = 118}; // size[4] Twrite tag[2] fid[4] offset[8] count[4] data[count]
 	enum {Rwrite = 119}; // size[4] Rwrite tag[2] count[4]
 
