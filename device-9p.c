@@ -35,6 +35,7 @@ not used because it is unavailable at the start of the boot process.
 #include "callupp.h"
 #include "device.h"
 #include "hashtab.h"
+#include "multifork.h"
 #include "printf.h"
 #include "panic.h"
 #include "paramblkprint.h"
@@ -58,8 +59,8 @@ not used because it is unavailable at the start of the boot process.
 #define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1))
 
 // rename some FCB fields for our own use
-#define fcb9FID fcbSBlk // type is unsigned short
 #define fcb9Link fcbFlPos
+#define fcb9Opaque fcbExtRec // array totalling to 12 bytes
 
 enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
@@ -167,6 +168,7 @@ static int pathBlobSize;
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
+static struct MFImpl MF;
 static struct bootBlock bootBlock = {
 	.magic = 0x4c4b,
 	.entryBRA = 0x60000088,
@@ -367,6 +369,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
 		return openErr;
 	}
+
+	// Choose a multifork format by probing the fs contents
+	MF = MFChoose();
 
 	installDrive();
 
@@ -775,44 +780,32 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	char childname[512];
 	char scratch[4096];
 
-	Lopen9(fid, O_RDONLY|O_DIRECTORY, NULL, NULL);
-	InitReaddir9(fid, scratch, sizeof scratch);
+	Walk9(fid, FID1, 0, NULL, NULL, NULL);
+	Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL);
+	InitReaddir9(FID1, scratch, sizeof scratch);
 	while (Readdir9(scratch, NULL, NULL, childname) == 0 && valence < 0x7fff) {
 		if (visName(childname)) valence++;
 	}
-	Clunk9(fid);
+	Clunk9(FID1);
+
+	struct MFAttr attr;
+	MF.DGetAttr(fid, getDBName(cnid), MF_FINFO, &attr);
 
 	// Clear fields from ioFlAttrib onward
 	memset((char *)pb + 30, 0, 100 - 30);
 
 	pb->ioFRefNum = 0; // not sure what this means for dirs?
 	pb->ioFlAttrib = ioDirMask;
+	memcpy(&pb->ioDrUsrWds, attr.finfo, sizeof pb->ioDrUsrWds);
 	pb->ioDrDirID = cnid;
 	pb->ioDrNmFls = valence;
+	memcpy(&pb->ioDrFndrInfo, attr.fxinfo, sizeof pb->ioDrFndrInfo);
 	pb->ioDrParID = getDBParent(cnid);
 }
 
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
-	// Could use this for "permissions" info in the future
-	struct Stat9 stat = {};
-	Getattr9(fid, STAT_SIZE, &stat);
-
-	// Resource fork info-getting, needs to be factored out
-	struct Stat9 rstat = {};
-	char rname[512];
-	strcpy(rname, getDBName(cnid));
-	strcat(rname, ".rsrc");
-	if (!Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL))
-		Getattr9(FID1, STAT_SIZE, &rstat);
-
-	// Finder info-getting, needs to be factored out
-	struct FInfo finfo = {};
-	char iname[512];
-	strcpy(iname, getDBName(cnid));
-	strcat(iname, ".idump");
-	if (!Walk9(fid, FID1, 2, (const char *[]){"..", iname}, NULL, NULL))
-		if (!Lopen9(FID1, O_RDONLY, NULL, NULL))
-			Read9(FID1, &finfo, 0, 8, NULL);
+	struct MFAttr attr;
+	MF.FGetAttr(fid, getDBName(cnid), MF_DSIZE|MF_RSIZE|MF_TIME|MF_FINFO, &attr);
 
 	// Determine whether the file is open
 	bool openRF = false, openDF = false;
@@ -837,12 +830,12 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 		(kioFlAttribResOpenMask * openRF) |
 		(kioFlAttribDataOpenMask * openDF) |
 		(kioFlAttribFileOpenMask * (openRF || openDF));
-	pb->ioFlFndrInfo = finfo;
+	memcpy(&pb->ioFlFndrInfo, attr.finfo, sizeof pb->ioFlFndrInfo);
 	if (pb->ioTrap & 0x200) pb->ioDirID = cnid; // peculiar field
-	pb->ioFlLgLen = stat.size;
-	pb->ioFlPyLen = (stat.size + 511) & -512;
-	pb->ioFlRLgLen = rstat.size;
-	pb->ioFlRPyLen = (rstat.size + 511) & -512;
+	pb->ioFlLgLen = attr.dsize;
+	pb->ioFlPyLen = (attr.dsize + 511) & -512;
+	pb->ioFlRLgLen = attr.rsize;
+	pb->ioFlRPyLen = (attr.rsize + 511) & -512;
 
 	if ((pb->ioTrap & 0xff) != 0x60) return;
 	// GetCatInfo only beyond this point
@@ -858,17 +851,20 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 static OSErr fsSetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
 	cnid = browse(FID1, cnid, pb->ioNamePtr);
-	if (cnid < 0) return cnid;
+	if (iserr(cnid)) return cnid;
 
-	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
+	// TODO: mtime setting
+	struct MFAttr attr = {};
+	memcpy(attr.finfo, &pb->ioFlFndrInfo, sizeof pb->ioFlFndrInfo); // same field as ioDrUsrWds
+	memcpy(attr.fxinfo, &pb->ioFlXFndrInfo, sizeof pb->ioFlXFndrInfo); // same field as ioDrFndrInfo
 
-	char iname[512];
-	sprintf(iname, "%s.idump", getDBName(cnid));
-
-	if (!Lcreate9(FID1, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL)) {
-		Write9(FID1, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
-		Clunk9(FID1);
+	if (isdir(cnid)) {
+		MF.DSetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
+	} else {
+		MF.FSetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
 	}
+
+	return noErr;
 }
 
 static OSErr fsSetVol(struct HFileParam *pb) {
@@ -969,52 +965,22 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
 
-	uint32_t fid = 32 + refn;
-	Clunk9(fid); // preemptive
-
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(fid, cnid, pb->ioNamePtr);
+	cnid = browse(FID1, cnid, pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 	if (isdir(cnid)) return fnfErr;
 
-	struct Stat9 stat;
-	if (Getattr9(fid, 0, &stat)) return permErr;
+	uint64_t opaque[3] = {};
+	int err = MF.Open(opaque, refn, FID1, getDBName(cnid), rfork, pb->ioPermssn != fsRdPerm);
+	// no way to tell if we were successful in getting write perms, but the File Manager API permits this
+	if (err == EPERM) return permErr;
+	else if (err == ENOENT) return fnfErr;
+	else if (err) return ioErr;
 
-	if (rfork) {
-		char rname[512];
-		sprintf(rname, "%s.rsrc", getDBName(cnid));
-
-		// Make sure the sidecar file exists
-		Walk9(fid, FID1, 1, (const char *[]){".."}, NULL, NULL); // parent dir
-		Lcreate9(FID1, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL);
-		Clunk9(FID1);
-
-		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL)) return ioErr;
-		if (Getattr9(fid, 0, &stat)) return permErr;
-		if (stat.qid.type & 0x80) return fnfErr; // again, better not be a folder!
-	}
-
-	// Open with the best permissions we can get
-	if (pb->ioPermssn == fsRdPerm) {
-		if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
-			return permErr;
-		}
-	} else {
-		if (Lopen9(fid, O_RDWR, NULL, NULL)) {
-			pb->ioPermssn = fsRdPerm;
-			if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
-				return permErr;
-			}
-		}
-	}
-
-	long type = '????';
-	char iname[512];
-	strcpy(iname, getDBName(cnid));
-	strcat(iname, ".idump");
-	if (!Walk9(fid, FID1, 2, (const char *[]){"..", iname}, NULL, NULL))
-		if (!Lopen9(FID1, O_RDONLY, NULL, NULL))
-			Read9(FID1, &type, 0, sizeof type, NULL);
+	struct MFAttr attr = {};
+	MF.FGetAttr(FID1, getDBName(cnid), MF_FINFO|(rfork?MF_RSIZE:MF_DSIZE), &attr);
+	uint64_t size = rfork ? attr.rsize : attr.dsize;
+	if (size > 0xfffffd00) size = 0xfffffd00;
 
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
@@ -1022,21 +988,19 @@ static OSErr fsOpen(struct HIOParam *pb) {
 			(fcbResourceMask * rfork) |
 			(fcbWriteMask * (pb->ioPermssn != fsRdPerm)),
 		.fcbTypByt = 0, // MFS only
-		.fcb9FID = fid,
 		.fcb9Link = refn,
-		.fcbEOF = stat.size,
-		.fcbPLen = (stat.size + 511) & -512,
+		.fcbEOF = size,
+		.fcbPLen = (size + 511) & -512,
 		.fcbCrPs = 0,
 		.fcbVPtr = &vcb,
 		.fcbBfAdr = NULL, // reserved
 		.fcbClmpSize = 512,
 		.fcbBTCBPtr = NULL, // reserved
-		.fcbExtRec = {}, // own use
-		.fcbFType = type,
 		.fcbCatPos = 0, // own use
 		.fcbDirID = getDBParent(cnid),
 	};
-
+	memcpy(fcb->fcb9Opaque, opaque, 12); // special private struct
+	memcpy(&fcb->fcbFType, attr.finfo, 4); // 4char type code
 	mr31name(fcb->fcbCName, getDBName(cnid));
 
 	// Arrange FCBs of the same fork into a circular linked list
@@ -1073,10 +1037,9 @@ static OSErr fsSetEOF(struct IOParam *pb) {
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	long len = (long)pb->ioMisc;
+	long len = (uint32_t)pb->ioMisc;
 
-	int err = Setattr9(fcb->fcb9FID, SET_SIZE, (struct Stat9){.size=len});
-
+	int err = MF.SetEOF(fcb->fcb9Opaque, len);
 	if (err) panic("seteof error");
 
 	// Tell all the other FCBs about this new length
@@ -1113,7 +1076,8 @@ static OSErr fsClose(struct IOParam *pb) {
 		fellowFile = fellowFCB->fcb9Link;
 	}
 
-	Clunk9(fcb->fcb9FID);
+	MF.Close(fcb->fcb9Opaque);
+
 	fcb->fcbFlNm = 0;
 
 	return noErr;
@@ -1174,14 +1138,14 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 				buf = stackbuf;
 			}
 
-			err = Write9(fcb->fcb9FID, buf, fcb->fcbCrPs, want, &got);
+			err = MF.Write(fcb->fcb9Opaque, buf, fcb->fcbCrPs, want, &got);
 		} else {
 			char *buf = pb->ioBuffer + pb->ioActCount;
 			if (usestackbuf) {
 				buf = stackbuf; // discard: editing ROM is silently ignored
 			}
 
-			err = Read9(fcb->fcb9FID, buf, fcb->fcbCrPs, want, &got);
+			err = MF.Read(fcb->fcb9Opaque, buf, fcb->fcbCrPs, want, &got);
 		}
 
 		pb->ioActCount += got;
@@ -1285,17 +1249,9 @@ static OSErr fsDelete(struct IOParam *pb) {
 		}
 	}
 
-	// This is hacky, needs to be replaced with systematic sidecar management
-	Walk9(FID1, FID2, 1, (const char *[]){".."}, NULL, NULL);
-
-	if (Remove9(FID1)) return fBsyErr; // assume it was a full directory
-
-	const char *sidecars[] = {"%s.rsrc", "%s.idump", "._%s"};
-	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
-		char delname[512];
-		sprintf(delname, sidecars[i], getDBName(cnid));
-		Unlinkat9(FID2, delname, 0);
-	}
+	int err = MF.Del(FID1, getDBName(cnid), isdir(cnid));
+	if (err == EEXIST || err == ENOTEMPTY) return fBsyErr;
+	else if (err) return ioErr;
 
 	return noErr;
 }
@@ -1330,28 +1286,17 @@ static OSErr fsRename(struct IOParam *pb) {
 	}
 
 	// Disallow a duplicate-looking filename
+	// (The Unix/9P behaviour is to overwrite the destination silently)
 	if (!iserr(browse(JUNK, parentCNID, newNameR))) return dupFNErr;
 
 	// Need a PARENT for the Trenameat call
 	Walk9(CHILD, PARENT, 1, (const char *[]){".."}, NULL, NULL);
 
-	if (Renameat9(PARENT, oldNameU, PARENT, newNameU)) return ioErr;
+	int lerr = MF.Move(PARENT, oldNameU, PARENT, newNameU);
+	if (lerr) return ioErr;
 
 	// Commit to the rename, so correct the database
 	setDB(childCNID, parentCNID, newNameU);
-
-	// Then rename the sidecar files, not checking for errors
-	const char *sidecars[] = {"%s.rsrc", "%s.idump", "._%s"};
-	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
-		char oldSidecar[512], newSidecar[512];
-		sprintf(oldSidecar, sidecars[i], oldNameU);
-		sprintf(newSidecar, sidecars[i], newNameU);
-
-		int err = Renameat9(PARENT, oldSidecar, PARENT, newSidecar);
-		if (err != 0 && err != ENOENT) {
-			panic("surprising error while renaming sidecar file");
-		}
-	}
 
 	return noErr;
 }
@@ -1820,14 +1765,7 @@ static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigne
 }
 
 static bool visName(const char *name) {
-	if (name[0] == '.') return false;
-
-	int len = strlen(name);
-	if (len >= 5 && !strcmp(name+len-5, ".rsrc")) return false;
-	if (len >= 6 && !strcmp(name+len-6, ".rdump")) return false;
-	if (len >= 6 && !strcmp(name+len-6, ".idump")) return false;
-
-	return true;
+	return (name[0] != '.' && !MF.IsSidecar(name));
 }
 
 // Hash table accessors, tuned to minimise slot usage
