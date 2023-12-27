@@ -111,7 +111,7 @@ int fgetattr3(uint32_t fid, const char *name, unsigned fields, struct MFAttr *at
 
 	// Costly: stat the data fork
 	// The data fork is essential, so this is the only operation that can make the function fail
-	if ((fields & MF_DSIZE) || (fields && MF_TIME)) {
+	if ((fields & MF_DSIZE) || (fields & MF_TIME)) {
 		struct Stat9 dstat = {};
 		int err = Getattr9(fid,
 			((fields & MF_DSIZE) ? STAT_SIZE : 0) |
@@ -124,7 +124,7 @@ int fgetattr3(uint32_t fid, const char *name, unsigned fields, struct MFAttr *at
 	}
 
 	// Costly: stat the resource fork
-	if ((fields & MF_RSIZE) || (fields && MF_TIME)) {
+	if ((fields & MF_RSIZE) || (fields & MF_TIME)) {
 		struct Stat9 rstat = {};
 		char rname[1024];
 		strcpy(rname, name);
