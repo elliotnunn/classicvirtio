@@ -29,6 +29,7 @@ not used because it is unavailable at the start of the boot process.
 #include <LowMem.h>
 #include <Memory.h>
 #include <MixedMode.h>
+#include <OSUtils.h>
 #include <Start.h>
 #include <Traps.h>
 
@@ -140,6 +141,7 @@ static bool visName(const char *name);
 static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
 static int32_t getDBParent(int32_t cnid);
+int32_t mactime(int64_t unixtime);
 static long fsCall(void *pb, long selector, void *stack);
 static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
@@ -799,6 +801,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	memcpy(&pb->ioDrUsrWds, attr.finfo, sizeof pb->ioDrUsrWds);
 	pb->ioDrDirID = cnid;
 	pb->ioDrNmFls = valence;
+	pb->ioDrCrDat = pb->ioDrMdDat = mactime(attr.unixtime);
 	memcpy(&pb->ioDrFndrInfo, attr.fxinfo, sizeof pb->ioDrFndrInfo);
 	pb->ioDrParID = getDBParent(cnid);
 }
@@ -836,6 +839,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 	pb->ioFlPyLen = (attr.dsize + 511) & -512;
 	pb->ioFlRLgLen = attr.rsize;
 	pb->ioFlRPyLen = (attr.rsize + 511) & -512;
+	pb->ioFlCrDat = pb->ioFlMdDat = mactime(attr.unixtime);
 
 	if ((pb->ioTrap & 0xff) != 0x60) return;
 	// GetCatInfo only beyond this point
@@ -1796,6 +1800,26 @@ static int32_t getDBParent(int32_t cnid) {
 	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
 	if (!rec) return 0;
 	return rec->parent;
+}
+
+int32_t mactime(int64_t unixtime) {
+	struct MachineLocation loc;
+	ReadLocation(&loc);
+	int32_t tz = loc.u.gmtDelta & 0xffffff;
+	if (tz & 0x800000) tz -= 0x1000000; // sign-extend
+
+	// Mac epoch = 1904, Unix epoch = 1970 (24107 days)
+	// Mac time is TZ local
+	uint64_t mactime = unixtime + (24107)*24*60*60 + tz;
+
+	// The time "epoch+0" (start of 1904) has special meaning to MPW ("file corrupt")
+	// Let's recast this as everything before MacE+0x80000000, which is only 2 years after the Unix epoch
+	if (mactime < 0x80000000UL) return 0;
+
+	// What to do about the 2040 time rollover problem?
+	if (mactime > 0xffffffffUL) return 0xffffffff;
+
+	return mactime;
 }
 
 static long fsCall(void *pb, long selector, void *stack) {
