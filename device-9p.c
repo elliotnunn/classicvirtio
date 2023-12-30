@@ -1912,7 +1912,7 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMGetWDInfo: return noErr;
 	case kFSMGetFCBInfo: return noErr;
 	case kFSMGetCatInfo: return fsGetFileInfo(pb);
-	case kFSMSetCatInfo: return noErr;
+	case kFSMSetCatInfo: return fsSetFileInfo(pb);
 	case kFSMSetVolInfo: return noErr;
 	case kFSMLockRng: return extFSErr;
 	case kFSMUnlockRng: return extFSErr;
