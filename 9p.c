@@ -185,6 +185,29 @@ int Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const ch
 		retqid, retiounit);
 }
 
+int Xattrwalk9(uint32_t fid, uint32_t newfid, const char *name, uint64_t *retsize) {
+	enum {Txattrwalk = 30}; // size[4] Txattrwalk tag[2] fid[4] newfid[4] name[s]
+	enum {Rxattrwalk = 31}; // size[4] Rxattrwalk tag[2] size[8]
+
+	if (newfid < 32 && fid != newfid && (openfids & (1<<newfid))) Clunk9(newfid);
+
+	int err = transact(Txattrwalk, "dds", "q",
+		fid, newfid, name,
+		retsize);
+	if (err) return err;
+
+	if (newfid < 32) openfids |= 1<<newfid;
+	return 0;
+}
+
+int Xattrcreate9(uint32_t fid, const char *name, uint64_t size, uint32_t flags) {
+	enum {Txattrcreate = 32}; // size[4] Txattrcreate tag[2] fid[4] name[s] attr_size[8] flags[4]
+	enum {Rxattrcreate = 33}; // size[4] Rxattrcreate tag[2]
+
+	return transact(Txattrcreate, "dsqd", "",
+		fid, name, size, flags);
+}
+
 int Remove9(uint32_t fid) {
 	enum {Tremove = 122}; // size[4] Tremove tag[2] fid[4]
 	enum {Rremove = 123}; // size[4] Rremove tag[2]
