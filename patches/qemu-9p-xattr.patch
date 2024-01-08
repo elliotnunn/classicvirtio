@@ -1,0 +1,50 @@
+--- a/hw/9pfs/9p-xattr-user.c
++++ b/hw/9pfs/9p-xattr-user.c
+@@ -112,3 +112,11 @@ XattrOperations passthrough_user_xattr = {
+     .listxattr = pt_listxattr,
+     .removexattr = pt_removexattr,
+ };
++
++XattrOperations passthrough_apple_xattr = {
++    .name = "com.apple.",
++    .getxattr = pt_getxattr,
++    .setxattr = pt_setxattr,
++    .listxattr = pt_listxattr,
++    .removexattr = pt_removexattr,
++};
+diff --git a/hw/9pfs/9p-xattr.c b/hw/9pfs/9p-xattr.c
+index 9ae69dd8db..60fbd58633 100644
+--- a/hw/9pfs/9p-xattr.c
++++ b/hw/9pfs/9p-xattr.c
+@@ -279,6 +279,9 @@ XattrOperations *mapped_xattr_ops[] = {
+
+ XattrOperations *passthrough_xattr_ops[] = {
+     &passthrough_user_xattr,
++#ifdef CONFIG_DARWIN
++    &passthrough_apple_xattr,
++#endif
+     &passthrough_acl_xattr,
+     NULL,
+ };
+@@ -286,6 +289,9 @@ XattrOperations *passthrough_xattr_ops[] = {
+ /* for .user none model should be same as passthrough */
+ XattrOperations *none_xattr_ops[] = {
+     &passthrough_user_xattr,
++#ifdef CONFIG_DARWIN
++    &passthrough_apple_xattr,
++#endif
+     &none_acl_xattr,
+     NULL,
+ };
+diff --git a/hw/9pfs/9p-xattr.h b/hw/9pfs/9p-xattr.h
+index 35bcd24f77..314938d61e 100644
+--- a/hw/9pfs/9p-xattr.h
++++ b/hw/9pfs/9p-xattr.h
+@@ -38,6 +38,7 @@ ssize_t local_removexattr_nofollow(FsContext *ctx, const char *path,
+
+ extern XattrOperations mapped_user_xattr;
+ extern XattrOperations passthrough_user_xattr;
++extern XattrOperations passthrough_apple_xattr;
+
+ extern XattrOperations mapped_pacl_xattr;
+ extern XattrOperations mapped_dacl_xattr;

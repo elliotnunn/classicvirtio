@@ -4,6 +4,7 @@
 #include "multifork.h"
 
 struct MFImpl MFChoose(const char *suggest) {
+	if (suggest[0] == '1') return MF1;
 	if (suggest[0] == '3') return MF3;
 
 	// probably should fall back on some autodetection
