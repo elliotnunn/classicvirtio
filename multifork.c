@@ -3,10 +3,9 @@
 
 #include "multifork.h"
 
-struct MFImpl MFChoose(void) {
-	int format = 3; // we will stick with the current format for now
+struct MFImpl MFChoose(const char *suggest) {
+	if (suggest[0] == '3') return MF3;
 
-	if (format == 3) {
-		return MF3;
-	}
+	// probably should fall back on some autodetection
+	return MF3;
 }

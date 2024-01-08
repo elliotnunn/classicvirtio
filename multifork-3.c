@@ -30,6 +30,10 @@ struct openfile {
 	short fid;
 };
 
+static int init3(void) {
+	return 0;
+}
+
 static int open3(void *opaque, short refnum, uint32_t fid, const char *name, bool resfork, bool write) {
 	struct openfile *mystruct = opaque;
 	int err = 0;
@@ -243,6 +247,8 @@ static bool issidecar3(const char *name) {
 }
 
 struct MFImpl MF3 = {
+	.Name = ".idump/.rsrc",
+	.Init = &init3,
 	.Open = &open3,
 	.Close = &close3,
 	.Read = &read3,

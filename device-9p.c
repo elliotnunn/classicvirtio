@@ -328,7 +328,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	regentryid = info->deviceEntry;
 	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-// 		logenable = 1;
+		logenable = 1;
 // 	}
 
 	printf("Starting\n");
@@ -372,8 +372,28 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return openErr;
 	}
 
+	// Read mount_tag from config space into a C string
+	// (Suffixed with :1 or :2 etc to force a specific multifork format)
+	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
+	if (nameLen > 127) nameLen = 127;
+	char name[128] = {};
+	memcpy(name, VConfig+2, nameLen); // guarantee null term
+
+	char *formathint = "";
+	char *separator = strchr(name, '_');
+	if (separator != NULL) {
+		formathint = separator + 1;
+		*separator = 0; // terminate the disk name there
+	}
+
+	printf("Volume name: %s\n", name);
+	mr27name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
+	setDB(2, 1, name);
+
 	// Choose a multifork format by probing the fs contents
-	MF = MFChoose();
+	MF = MFChoose(formathint);
+	printf("Fork format: %s\n", MF.Name);
+	if (MF.Init()) return memFullErr;
 
 	installDrive();
 
@@ -593,15 +613,6 @@ static OSErr boot(void) {
 
 static OSErr fsMountVol(struct IOParam *pb) {
 	if (dqe.dqe.qType) return volOnLinErr;
-
-	// Read mount_tag from config space into a C string
-	char name[128] = {};
-	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
-	if (nameLen > 127) nameLen = 127;
-	memcpy(name, VConfig + 2, nameLen);
-	mr27name(vcb.vcbVN, name); // and convert to short Mac Roman pascal string
-
-	setDB(2, 1, name);
 
 	vparms.vMLocalHand = NewHandleSysClear(2);
 
@@ -1997,11 +2008,11 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 static OSErr cIcon(struct CntrlParam *pb) {
 	struct about {
 		uint32_t icon[64];
-		unsigned char location[];
+		unsigned char location[64];
 	};
 
 	// B&W HD icon, Sys 8+ converts to colour version
-	static const struct about hd = {
+	static struct about hd = {
 		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Icon
 		0x00000000, 0x00000000, 0x00000000, 0x00000000,
 		0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -2018,8 +2029,10 @@ static OSErr cIcon(struct CntrlParam *pb) {
 		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
 		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
 		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
-		"\x06" "Virtio" // "Where" field in Get Info
+		// dynamically create the "location" field, goes in the Get Info window
 	};
+
+	hd.location[0] = sprintf(hd.location + 1, "Virtio 9P device (%s)", MF.Name);
 
 	static const void *ret = &hd;
 	memcpy(pb->csParam, &ret, sizeof ret);
