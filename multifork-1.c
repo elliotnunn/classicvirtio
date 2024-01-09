@@ -6,13 +6,15 @@ Implementation of the 1-file multifork format
 (the actual forks and metadata exposed by Mac OS X)
 */
 
-#include <string.h>
+#include <Memory.h>
 
 #include "9p.h"
 #include "panic.h"
 #include "printf.h"
 
 #include "multifork.h"
+
+#include <string.h>
 
 // Fids 8-15 are reserved for the multifork layer
 enum {
