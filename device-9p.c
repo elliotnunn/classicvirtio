@@ -232,13 +232,6 @@ static struct GetVolParmsInfoBuffer vparms = {
 	.vMServerAdr = 0, // might be used for uniqueness checking -- ?set uniq
 };
 
-
-// Work around a ROM bug:
-// If kDriverIsLoadedUponDiscovery is set, the ROM calls GetDriverDescription
-// for a pointer to the global below, then frees it with DisposePtr. Padding
-// the global to a positive offset within our global area defeats DisposePtr.
-char BugWorkaroundExport1[] = "TheDriverDescription must not come first";
-
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
 	kInitialDriverDescriptor,
@@ -249,8 +242,6 @@ DriverDescription TheDriverDescription = {
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
-
-char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dReadEnableMask;
 const char drvrNameVers[] = "\x09.Virtio9P\0\x01\x00";

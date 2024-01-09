@@ -88,10 +88,9 @@ build/ndrv/allndrv: $(patsubst %,build/ndrv/ndrv-%,$(DEVICES_NDRV))
 build/ndrv/%.o: %.c
 	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
 
-# GNU LD is just too fiddly to call directly
-NDRVDYLIBS = StdCLib DriverServicesLib MathLib NameRegistryLib PCILib VideoServicesLib InterfaceLib ControlsLib
-build/ndrv/ndrv-%.so: build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
-	powerpc-apple-macos-gcc -shared -Wl,--gc-sections -Wl,-bE:ndrv.exp -o $@ $^ $(patsubst %,-l%,$(NDRVDYLIBS))
+NDRVSTATICLIBS = $(shell for x in libStdCLib.a libDriverServicesLib.a libNameRegistryLib.a libPCILib.a libVideoServicesLib.a libInterfaceLib.a libControlsLib.a libgcc.a libc.a; do powerpc-apple-macos-gcc -print-file-name=$$x; done)
+build/ndrv/ndrv-%.so: ndrv.lds build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
+	powerpc-apple-macos-ld --gc-sections --gc-keep-exported -bE:ndrv.exp -o $@ --script $^ $(NDRVSTATICLIBS)
 
 build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 	MakePEF -o $@ $^
