@@ -94,3 +94,4 @@ build/ndrv/ndrv-%.so: ndrv.lds build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%
 
 build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 	MakePEF -o $@ $^
+	scripts/squishpef.py $@ $@
