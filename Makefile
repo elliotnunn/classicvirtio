@@ -79,14 +79,14 @@ build/classic/drvr-%: build/classic/drvr-%.elf
 # Open Firmware compatible program to load our drivers into the device tree
 # (These section addresses match the Mac OS Trampoline loader, so they're safe.)
 build/ndrv/ndrvloader: ndrvloader.s ndrvloader.c build/ndrv/allndrv
-	powerpc-apple-macos-gcc -O2 -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ ndrvloader.s ndrvloader.c
+	powerpc-apple-macos-gcc -Os -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ ndrvloader.s ndrvloader.c
 
 # Glom all the NDRVs together: the loader shim can unpick them
 build/ndrv/allndrv: $(patsubst %,build/ndrv/ndrv-%,$(DEVICES_NDRV))
 	cat $^ >$@
 
 build/ndrv/%.o: %.c
-	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
+	powerpc-apple-macos-gcc -c -Os -ffunction-sections -fdata-sections -o $@ $<
 
 NDRVSTATICLIBS = $(shell for x in libStdCLib.a libDriverServicesLib.a libNameRegistryLib.a libPCILib.a libVideoServicesLib.a libInterfaceLib.a libControlsLib.a libgcc.a libc.a; do powerpc-apple-macos-gcc -print-file-name=$$x; done)
 build/ndrv/ndrv-%.so: ndrv.lds build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
