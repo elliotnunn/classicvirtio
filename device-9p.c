@@ -1307,6 +1307,44 @@ static OSErr fsRename(struct IOParam *pb) {
 	return noErr;
 }
 
+// -->    12    ioCompletion  pointer
+// <--    16    ioResult      word
+// -->    18    ioNamePtr     pointer
+// -->    22    ioVRefNum     word
+// -->    28    ioNewName     pointer
+// -->    36    ioNewDirID    long word
+// -->    48    ioDirID       long word
+// Must not overwrite an existing file
+static OSErr fsCatMove(struct CMovePBRec *pb) {
+	// Move the file/directory with cnid1...
+	int32_t cnid1 = browse(FID1, pbDirID(pb), pb->ioNamePtr);
+	if (iserr(cnid1)) return cnid1;
+	if (cnid1 == 2) return bdNamErr; // can't move root
+	const char *name = getDBName(cnid1);
+
+	// ...into the directory with cnid2.
+	// Subtle bug: if the ioNewName is an absolute path to a *different disk*,
+	// browse will nontheless carry on searching for the subpath in *this disk*.
+	int32_t cnid2 = browse(FID2, pb->ioNewDirID, pb->ioNewName);
+	if (iserr(cnid2)) return cnid2;
+	if (!isdir(cnid2)) return bdNamErr;
+
+	// Disallow a duplicate-looking filename
+	// (The Unix/9P behaviour is to overwrite the destination silently)
+	unsigned char romanname[32];
+	mr31name(romanname, name);
+	if (!iserr(browse(FID3, cnid2, romanname))) return dupFNErr; // FID3 is junk
+
+	// Navigate "up" a level because 9P expects the parent fid
+	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
+
+	int lerr = MF.Move(FID1, getDBName(cnid1), FID2, getDBName(cnid1));
+	if (lerr == EINVAL) badMovErr;
+	else if (lerr) return ioErr;
+
+	return noErr;
+}
+
 // "Working directories" are a compatibility shim for apps expecting flat disks:
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
@@ -1909,7 +1947,7 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMFlushFile: return noErr;
 	case kFSMOpenWD: return fsOpenWD(pb);
 	case kFSMCloseWD: return fsCloseWD(pb);
-	case kFSMCatMove: return extFSErr;
+	case kFSMCatMove: return fsCatMove(pb);
 	case kFSMDirCreate: return fsCreate(pb);
 	case kFSMGetWDInfo: return noErr;
 	case kFSMGetFCBInfo: return noErr;
