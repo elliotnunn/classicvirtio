@@ -36,7 +36,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 	NEWLINE();
 
 	if (errcode<=0) {
-		SPRINTF("result      %d %s", errcode, errname(errcode));
+		SPRINTF("result      %d %sErr", errcode, errname(errcode));
 		NEWLINE();
 	}
 
@@ -257,44 +257,44 @@ static const char *callname(unsigned short selector) {
 // Only lists errors that might be returned by an FS driver
 static const char *errname(short err) {
 	switch (err) {
-		case 0: return "noErr";
-		case -17: return "controlErr";
-		case -18: return "statusErr";
-		case -19: return "readErr";
-		case -20: return "writErr";
-		case -23: return "openErr";
-		case -24: return "closErr";
-		case -33: return "dirFulErr";
-		case -34: return "dskFulErr";
-		case -35: return "nsvErr";
-		case -36: return "ioErr";
-		case -37: return "bdNamErr";
-		case -38: return "fnOpnErr";
-		case -39: return "eofErr";
-		case -40: return "posErr";
-		case -42: return "tmfoErr";
-		case -43: return "fnfErr";
-		case -44: return "wPrErr";
-		case -45: return "fLckdErr";
-		case -46: return "vLckdErr";
-		case -47: return "fBsyErr";
-		case -48: return "dupFNErr";
-		case -49: return "opWrErr";
-		case -50: return "paramErr";
-		case -51: return "rfNumErr";
-		case -52: return "gfpErr";
-		case -53: return "volOffLinErr";
-		case -54: return "permErr";
-		case -55: return "volOnLinErr";
-		case -58: return "extFSErr";
-		case -59: return "fsRnErr";
-		case -60: return "badMDBErr";
-		case -61: return "wrPermErr";
-		case -65: return "offLinErr";
-		case -120: return "dirNFErr";
-		case -121: return "tmwdoErr";
-		case -122: return "badMovErr";
-		default: return "(unknown)";
+		case 0: return "no";
+		case -17: return "control";
+		case -18: return "status";
+		case -19: return "read";
+		case -20: return "writ";
+		case -23: return "open";
+		case -24: return "clos";
+		case -33: return "dirFul";
+		case -34: return "dskFul";
+		case -35: return "nsv";
+		case -36: return "io";
+		case -37: return "bdNam";
+		case -38: return "fnOpn";
+		case -39: return "eof";
+		case -40: return "pos";
+		case -42: return "tmfo";
+		case -43: return "fnf";
+		case -44: return "wPr";
+		case -45: return "fLckd";
+		case -46: return "vLckd";
+		case -47: return "fBsy";
+		case -48: return "dupFN";
+		case -49: return "opWr";
+		case -50: return "param";
+		case -51: return "rfNum";
+		case -52: return "gfp";
+		case -53: return "volOffLin";
+		case -54: return "perm";
+		case -55: return "volOnLin";
+		case -58: return "extFS";
+		case -59: return "fsRn";
+		case -60: return "badMDB";
+		case -61: return "wrPerm";
+		case -65: return "offLin";
+		case -120: return "dirNF";
+		case -121: return "tmwdo";
+		case -122: return "badMov";
+		default: return "unknown";
 	}
 }
 
