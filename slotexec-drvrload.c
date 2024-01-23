@@ -54,5 +54,5 @@ void exec(struct SEBlock *pb) {
 
 	pb->seResult = (long)hdl;
 	pb->seFlags = 0;
-	pb->seStatus = 1; // seSuccess
+	pb->seStatus = 0; // not seSuccess because the ROM inverts the meaning??
 }
