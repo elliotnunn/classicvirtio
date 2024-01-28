@@ -24,6 +24,9 @@ DEVICES_NDRV = 9p input gpu
 SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ndrvloader.c,$(wildcard *.c)))))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ndrvloader.c,$(wildcard *.c)))))
 
+# Settle a dispute between MacTypes.h and stdbool.h
+CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0
+
 ############################# CLASSIC DRVR #############################
 
 # The classic drivers are linked together into one "card declaration ROM":
@@ -41,7 +44,7 @@ build/classic/declrom: declrom.s \
 # The "slotexec" helper functions are also needed in the declaration ROM,
 # but are built using different compiler options (PC-relative addressing FYI)
 build/classic/slotexec-%.o: slotexec-%.c
-	m68k-apple-macos-gcc -c -Os -mpcrel -o $@ $^
+	m68k-apple-macos-gcc $(CDEFS) -c -Os -mpcrel -o $@ $^
 
 # Wrap an "sExecBlock" header around the slotexec code using a linker script
 build/classic/slotexec-%.elf: slotexec.lds build/classic/slotexec-%.o
@@ -53,7 +56,7 @@ build/classic/slotexec-%: build/classic/slotexec-%.elf
 
 # Compile the DRVR code files (slotexec code has different compiler options)
 build/classic/%.o: %.c
-	m68k-apple-macos-gcc -c -Os -ffunction-sections -fdata-sections -o $@ $<
+	m68k-apple-macos-gcc $(CDEFS) -c -Os -ffunction-sections -fdata-sections -o $@ $<
 
 # Link each DRVR, creating the Device Manager header using a linker script.
 # "Classic 68k runtime" is statically linked, so pull in a libc and some MacOS glue code.
@@ -79,14 +82,14 @@ build/classic/drvr-%: build/classic/drvr-%.elf
 # Open Firmware compatible program to load our drivers into the device tree
 # (These section addresses match the Mac OS Trampoline loader, so they're safe.)
 build/ndrv/ndrvloader: ndrvloader.s ndrvloader.c build/ndrv/allndrv
-	powerpc-apple-macos-gcc -Os -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ ndrvloader.s ndrvloader.c
+	powerpc-apple-macos-gcc $(CDEFS) -Os -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ ndrvloader.s ndrvloader.c
 
 # Glom all the NDRVs together: the loader shim can unpick them
 build/ndrv/allndrv: $(patsubst %,build/ndrv/ndrv-%,$(DEVICES_NDRV))
 	cat $^ >$@
 
 build/ndrv/%.o: %.c
-	powerpc-apple-macos-gcc -c -Os -ffunction-sections -fdata-sections -o $@ $<
+	powerpc-apple-macos-gcc $(CDEFS) -c -Os -ffunction-sections -fdata-sections -o $@ $<
 
 NDRVSTATICLIBS = $(shell for x in libStdCLib.a libDriverServicesLib.a libNameRegistryLib.a libPCILib.a libVideoServicesLib.a libInterfaceLib.a libControlsLib.a libgcc.a libc.a; do powerpc-apple-macos-gcc -print-file-name=$$x; done)
 build/ndrv/ndrv-%.so: ndrv.lds build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
