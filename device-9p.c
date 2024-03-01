@@ -1228,7 +1228,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 	uniname[n++] = 0;
 
 	if ((pb->ioTrap & 0xff) == (_Create & 0xff)) {
-		if (Lcreate9(FID1, O_CREAT|O_EXCL, 0777, 0, uniname, NULL, NULL) || Clunk9(FID1)) return ioErr;
+		if (Lcreate9(FID1, O_CREAT|O_EXCL, 0666, 0, uniname, NULL, NULL) || Clunk9(FID1)) return ioErr;
 	} else {
 		struct Qid9 qid;
 		if (Mkdir9(FID1, 0777, 0, uniname, &qid) || Clunk9(FID1)) return ioErr;
