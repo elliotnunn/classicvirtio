@@ -1165,7 +1165,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 
 	// Is the fork (now) longer than we thought?
 	if (pb->ioPosOffset > fcb->fcbEOF) {
-		if (pb->ioActCount == 0) {
+		if (pb->ioReqCount == 0) {
 			// Just a SetFPos, doesn't prove the file is longer
 			fcb->fcbCrPs = fcb->fcbEOF;
 			pb->ioPosOffset = fcb->fcbEOF;
