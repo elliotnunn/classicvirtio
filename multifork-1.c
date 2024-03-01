@@ -166,6 +166,20 @@ static int write1(void *opaque, const void *buf, uint64_t offset, uint32_t count
 	return 0;
 }
 
+static int geteof1(void *opaque, uint64_t *len) {
+	struct openfile *mystruct = opaque;
+
+	// the easy path
+	if (!mystruct->resfork) {
+		struct Stat9 stat = {};
+		int err = Getattr9(mystruct->fid, STAT_SIZE, &stat);
+		if (err) return err;
+		*len = stat.size;
+	}
+
+	return Xattrwalk9(mystruct->fid, FID1, "com.apple.ResourceFork", len);
+}
+
 static int seteof1(void *opaque, uint64_t len) {
 	struct openfile *mystruct = opaque;
 

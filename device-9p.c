@@ -984,8 +984,10 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	else if (err) return ioErr;
 
 	struct MFAttr attr = {};
-	MF.FGetAttr(FID1, getDBName(cnid), MF_FINFO|(rfork?MF_RSIZE:MF_DSIZE), &attr);
-	uint64_t size = rfork ? attr.rsize : attr.dsize;
+	MF.FGetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
+
+	uint64_t size;
+	MF.GetEOF(opaque, &size);
 	if (size > 0xfffffd00) size = 0xfffffd00;
 
 	*fcb = (struct FCBRec){
@@ -1033,7 +1035,12 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	pb->ioMisc = (Ptr)fcb->fcbEOF;
+	uint64_t size;
+	MF.GetEOF(fcb->fcb9Opaque, &size);
+	if (size > 0xfffffd00) size = 0xfffffd00;
+
+	fcb->fcbEOF = size;
+	pb->ioMisc = (Ptr)(uint32_t)size;
 
 	return noErr;
 }
