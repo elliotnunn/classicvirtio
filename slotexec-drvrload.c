@@ -3,6 +3,7 @@
 
 // Load DRVRs over 64K because the Slot Manager can't
 
+#include <LowMem.h>
 #include <Memory.h>
 #include <Slots.h>
 #include <ROMDefs.h>
@@ -18,6 +19,12 @@ struct driverRec {
 
 void exec(struct SEBlock *pb) {
 	int err;
+
+	// see the workaround in slotexec-boot.c
+	if (LMGetToolScratch()[0] == 'V' && LMGetToolScratch()[1] == 'I') {
+		pb->seSlot = LMGetToolScratch()[2];
+		pb->sesRsrcId = LMGetToolScratch()[3];
+	}
 
 	struct SpBlock sp = {.spSlot=pb->seSlot, .spID=pb->sesRsrcId};
 	err = SRsrcInfo(&sp); // sp.spsPointer = the sResource

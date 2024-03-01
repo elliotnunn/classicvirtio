@@ -217,7 +217,7 @@ Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
 	OSLstEntry sRsrcDrvrDir, 3$
-	/*OSLstEntry sRsrcLoadRec, SharedDriverLoader -- DISABLED because it can crash BootRec */
+	OSLstEntry sRsrcLoadRec, SharedDriverLoader
 	OSLstEntry sRsrcBootRec, BootRec
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
