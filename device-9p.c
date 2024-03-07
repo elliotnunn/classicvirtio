@@ -977,7 +977,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	if (isdir(cnid)) return fnfErr;
 
 	uint64_t opaque[3] = {};
-	int err = MF.Open(opaque, refn, FID1, getDBName(cnid), rfork, pb->ioPermssn != fsRdPerm);
+	int err = MF.Open(opaque, refn, cnid, FID1, getDBName(cnid), rfork, pb->ioPermssn != fsRdPerm);
 	// no way to tell if we were successful in getting write perms, but the File Manager API permits this
 	if (err == EPERM) return permErr;
 	else if (err == ENOENT) return fnfErr;

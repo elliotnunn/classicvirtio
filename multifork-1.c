@@ -90,7 +90,7 @@ static int slurprf(uint32_t fid) {
 	return 0;
 }
 
-static int open1(void *opaque, short refnum, uint32_t fid, const char *name, bool resfork, bool write) {
+static int open1(void *opaque, short refnum, int32_t cnid, uint32_t fid, const char *name, bool resfork, bool write) {
 	// The upper layer has promised us that this exists as a regular file
 	struct openfile *mystruct = opaque;
 	int err = 0;

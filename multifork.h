@@ -37,7 +37,7 @@ struct MFImpl MFChoose(const char *suggest);
 struct MFImpl {
 	const char *Name;
 	int (*Init)(void);
-	int (*Open)(void *opaque, short refnum, uint32_t fid, const char *name, bool resfork, bool write);
+	int (*Open)(void *opaque, short refnum, int32_t cnid, uint32_t fid, const char *name, bool resfork, bool write);
 	int (*Close)(void *opaque);
 	int (*Read)(void *opaque, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 	int (*Write)(void *opaque, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
