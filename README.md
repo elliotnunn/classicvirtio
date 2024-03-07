@@ -48,7 +48,7 @@ Tablet input
 
 *Presents a folder on the host computer as a bootable hard drive on the guest computer*
 
-- default resource forks and type/creator code format is a work in progress
+- resource forks in \*.rdump and type/creator codes in \*.idump
 - append `_1` to mount_tag to use the native fork format on a macOS host (needs patches)
 - bug: some filesystem operations (e.g. CatMove) unimplemented
 - bug: booting qemu-system-m68k requires hacks to PRAM

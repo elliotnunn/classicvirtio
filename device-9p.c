@@ -75,7 +75,7 @@ enum {
 	FIDBROWSE = 5,
 	WDLO = -32767,
 	WDHI = -4096,
-	STACKSIZE = 64 * 1024, // large stack bc memory is so hard to allocate
+	STACKSIZE = 256 * 1024, // large stack bc memory is so hard to allocate
 };
 
 struct longdqe {
@@ -1400,6 +1400,34 @@ static OSErr fsCloseWD(struct WDParam *pb) {
 	struct WDCBRec *rec = findWD(pb->ioVRefNum);
 	if (rec) memset(rec, 0, sizeof *rec);
 	return noErr;
+}
+
+// Shabby little hack that might turn into something good
+// flags == 0 means don't open, just navigate
+int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt) {
+	int err;
+
+	err = browse(fid, cnid, "");
+	if (err < 0) return ENOENT;
+
+	Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL);
+
+	char sidename[1024]; // like file.rdump or ._file
+	sprintf(sidename, fmt, getDBName(cnid));
+
+	// Squalid raciness
+	err = Walk9(fid, fid, 1, (const char *[]){sidename}, NULL, NULL);
+	if (flags == 0) return err;
+
+	if (err) goto trycreate;
+
+	err = Lopen9(fid, flags, NULL, NULL);
+	return err;
+
+trycreate:
+	// Should we be doing a dance to avoid a create-open race?
+	err = Lcreate9(fid, flags, 0666, 0, sidename, NULL, NULL);
+	return err;
 }
 
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
