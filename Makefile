@@ -21,8 +21,11 @@ DEVICES_CLASSIC = 9p input
 DEVICES_NDRV = 9p input gpu
 
 # And these are the C files that each device-*.c depends on (some are arch-specific)
-SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ndrvloader.c,$(wildcard *.c)))))
-SUPPORT_NDRV = $(filter-out %-classic.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ndrvloader.c,$(wildcard *.c)))))
+SUPPORT := $(filter-out device-%.c,$(wildcard *.c))
+SUPPORT := $(filter-out slotexec-%.c,$(SUPPORT)) # special files
+SUPPORT := $(filter-out ndrvloader.c,$(SUPPORT)) # special file
+SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(SUPPORT))
+SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 
 # Settle a dispute between MacTypes.h and stdbool.h
 CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0
