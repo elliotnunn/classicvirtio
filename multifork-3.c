@@ -55,6 +55,7 @@ struct res {
 
 int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt); // borrowed from device-9p.c
 
+static struct cacherec *cacheResourceFork(int32_t cnid, uint32_t fid, const char *name);
 static uint32_t readin(uint32_t rezfid, uint32_t scratchfid, uint64_t offset);
 static void writeout(uint32_t scratchfid, uint64_t offset, uint32_t rezfid);
 static int resorder(const void *a, const void *b);
@@ -99,44 +100,8 @@ static int open3(void *opaque, short refnum, int32_t cnid, uint32_t fid, const c
 		err = Lopen9(s->fid, O_RDONLY, NULL, NULL);
 		return err;
 	} else {
-		// Ensure the file has a cache entry (by CNID), and get a pointer
-		struct cacherec *c = HTlookup('R', &cnid, sizeof cnid);
-		if (!c) {
-			struct cacherec new = {.offset = tempfilelen};
-			tempfilelen += MAXFORK;
-			HTinstall('R', &cnid, sizeof cnid, &new, sizeof new);
-			c = HTlookup('R', &cnid, sizeof cnid);
-		}
-
-		// Navigate to the sidecar file (.rdump)
-		char rname[1024];
-		strcpy(rname, name);
-		strcat(rname, ".rdump");
-		int sidecarerr = Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL);
-
-		// Get the sidecar file's age (only if it exists and isn't already open)
-		struct Stat9 stat = {.mtime_nsec=1}; // fake time matches nothing
-		if (c->opencount==0 && sidecarerr==0) {
-			Getattr9(FID1, STAT_MTIME, &stat);
-		}
-		printf("restat sec %x\n", (int)stat.mtime_sec);
-
-		// Do we need a costly parse of the sidecar file?
-		if (sidecarerr) {
-			// Empty resource fork
-			c->size = 0;
-		} else if (c->opencount==0 && (c->sec!=stat.mtime_sec || c->nsec!=stat.mtime_nsec)) {
-			// Stale cached resource fork needs rereading
-			if (Lopen9(FID1, O_RDONLY, NULL, NULL)) panic("could not open rdump");
-			c->size = readin(FID1, FIDBIG, c->offset);
-			Clunk9(FID1);
-		} else {
-			// Valid cached resource fork
-		}
-
-		c->opencount++;
-
-		return 0;
+		cacheResourceFork(cnid, fid, name);
+		return noErr;
 	}
 }
 
@@ -248,8 +213,6 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 	// To be really clear, all these fields are zero until proven otherwise
 	memset(attr, 0, sizeof *attr);
 
-	attr->rsize = MAXFORK; // HACK -- how much does the resource manager care?
-
 	// Costly: stat the data fork
 	// The data fork is essential, so this is the only operation that can make the function fail
 	if ((fields & MF_DSIZE) || (fields & MF_TIME)) {
@@ -264,19 +227,11 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 		attr->unixtime = dstat.mtime_sec;
 	}
 
-	// Costly: stat the resource fork
-	if (fields & MF_TIME) {
-		struct Stat9 rstat = {};
-		char rname[1024];
-		strcpy(rname, name);
-		strcat(rname, ".rdump");
-
-		if (!Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL))
-			if (!Getattr9(FID1,
-					((fields & MF_TIME) ? STAT_MTIME : 0),
-					&rstat)) {
-				if (attr->unixtime < rstat.mtime_sec) attr->unixtime = rstat.mtime_sec;
-			}
+	// Very costly: ensure the resource fork has been Rezzed into the cache
+	if ((fields & MF_RSIZE) || (fields & MF_TIME)) {
+		struct cacherec *c = cacheResourceFork(cnid, fid, name);
+		attr->rsize = c->size;
+		if (attr->unixtime < c->sec) attr->unixtime = c->sec;
 	}
 
 	// Costly: read the Finder info
@@ -398,6 +353,45 @@ struct MFImpl MF3 = {
 	.Del = &del3,
 	.IsSidecar = &issidecar3,
 };
+
+static struct cacherec *cacheResourceFork(int32_t cnid, uint32_t fid, const char *name) {
+	// Ensure the file has a cache entry (by CNID), and get a pointer
+	struct cacherec *c = HTlookup('R', &cnid, sizeof cnid);
+	if (!c) {
+		struct cacherec new = {.offset = tempfilelen};
+		tempfilelen += MAXFORK;
+		HTinstall('R', &cnid, sizeof cnid, &new, sizeof new);
+		c = HTlookup('R', &cnid, sizeof cnid);
+	}
+
+	// Navigate to the sidecar file (.rdump)
+	char rname[1024];
+	strcpy(rname, name);
+	strcat(rname, ".rdump");
+	int sidecarerr = Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL);
+
+	// Get the sidecar file's age (only if it exists and isn't already open)
+	struct Stat9 stat = {.mtime_nsec=1}; // fake time matches nothing
+	if (c->opencount==0 && sidecarerr==0) {
+		Getattr9(FID1, STAT_MTIME, &stat);
+	}
+
+	// Do we need a costly parse of the sidecar file?
+	if (sidecarerr) {
+		// Empty resource fork
+		c->size = 0;
+	} else if (c->opencount==0 && (c->sec!=stat.mtime_sec || c->nsec!=stat.mtime_nsec)) {
+		// Stale cached resource fork needs rereading
+		if (Lopen9(FID1, O_RDONLY, NULL, NULL)) panic("could not open rdump");
+		c->size = readin(FID1, FIDBIG, c->offset);
+		Clunk9(FID1);
+	} else {
+		// Valid cached resource fork
+	}
+
+	c->opencount++;
+	return c;
+}
 
 static uint32_t readin(uint32_t rezfid, uint32_t scratchfid, uint64_t offset) {
 	int err;
