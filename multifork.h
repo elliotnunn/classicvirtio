@@ -30,9 +30,9 @@ struct MFAttr {
 	char finfo[16], fxinfo[16]; // Special Finder Sauce
 };
 
-extern struct MFImpl MF1, MF2, MF3;
+extern struct MFImpl MF, MF1, MF2, MF3;
 
-struct MFImpl MFChoose(const char *suggest);
+void MFChoose(const char *suggest);
 
 struct MFImpl {
 	const char *Name;

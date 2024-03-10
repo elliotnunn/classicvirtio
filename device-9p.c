@@ -170,7 +170,6 @@ static int pathBlobSize;
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
-static struct MFImpl MF;
 static struct bootBlock bootBlock = {
 	.magic = 0x4c4b,
 	.entryBRA = 0x60000088,
@@ -382,7 +381,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	setDB(2, 1, name);
 
 	// Choose a multifork format by probing the fs contents
-	MF = MFChoose(formathint);
+	MFChoose(formathint);
 	printf("Fork format: %s\n", MF.Name);
 	if (MF.Init()) return memFullErr;
 

@@ -3,10 +3,10 @@
 
 #include "multifork.h"
 
-struct MFImpl MFChoose(const char *suggest) {
-	if (suggest[0] == '1') return MF1;
-	if (suggest[0] == '3') return MF3;
+struct MFImpl MF;
 
-	// probably should fall back on some autodetection
-	return MF3;
+void MFChoose(const char *suggest) {
+	if (suggest[0] == '1') MF = MF1;
+	else if (suggest[0] == '3') MF = MF3;
+	else MF = MF3;
 }
