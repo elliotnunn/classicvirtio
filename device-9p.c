@@ -957,6 +957,22 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	return fnfErr;
 }
 
+// Update the EOF ofall duplicate FCBs
+// following the linked list set up in fsOpen
+static void updateKnownLength(short refnum, int32_t length) {
+	short fullcircle = refnum;
+	for (;;) {
+		FCBRec *fcb;
+		if (UnivResolveFCB(refnum, &fcb)) panic("FCB linked list broken (RW)");
+
+		fcb->fcbEOF = length;
+		if (fcb->fcbCrPs > length) fcb->fcbCrPs = length;
+
+		refnum = fcb->fcb9Link;
+		if (refnum == fullcircle) break;
+	}
+}
+
 static OSErr fsOpen(struct HIOParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 
@@ -1055,18 +1071,7 @@ static OSErr fsSetEOF(struct IOParam *pb) {
 	int err = MF.SetEOF(fcb->fcb9Opaque, len);
 	if (err) panic("seteof error");
 
-	// Tell all the other FCBs about this new length
-	short fellowFile = pb->ioRefNum;
-	FCBRec *fellowFCB;
-	for (;;) {
-		if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (SE)");
-
-		fellowFCB->fcbEOF = len;
-		if (fellowFCB->fcbCrPs > len) fellowFCB->fcbCrPs = len;
-
-		fellowFile = fellowFCB->fcb9Link;
-		if (fellowFile == pb->ioRefNum) break;
-	}
+	updateKnownLength(pb->ioRefNum, len);
 
 	return noErr;
 }
@@ -1096,10 +1101,10 @@ static OSErr fsClose(struct IOParam *pb) {
 	return noErr;
 }
 
-static OSErr fsReadWrite(struct IOParam *pb) {
-	// Are we being asked to touch non-DMA-able memory?
-	char stackbuf[512];
-	bool usestackbuf = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
+static OSErr fsRead(struct IOParam *pb) {
+	// Reads to ROM are get discarded
+	char scratch[512];
+	bool usescratch = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
 
 	pb->ioActCount = 0;
 
@@ -1107,100 +1112,152 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
+	// The seek/tell calls are just zero-length read calls
 	if ((pb->ioTrap & 0xff) == (_GetFPos & 0xff)) {
-		pb->ioPosMode = 0;
+		pb->ioPosMode = fsAtMark;
 		pb->ioReqCount = 0;
 	} else if ((pb->ioTrap & 0xff) == (_SetFPos & 0xff)) {
 		pb->ioReqCount = 0;
 	}
 
-	bool iswrite = ((pb->ioTrap & 0xff) == (_Write & 0xff));
-
-	if (iswrite && (fcb->fcbFlags & fcbWriteMask) == 0) return wrPermErr;
+	int32_t start, end, pos;
 
 	char seek = pb->ioPosMode & 3;
 	if (seek == fsAtMark) {
-		// leave fcb->fcbCrPs alone
+		pos = start = fcb->fcbCrPs;
 	} else if (seek == fsFromStart) {
-		fcb->fcbCrPs = pb->ioPosOffset;
+		pos = start = pb->ioPosOffset;
 	} else if (seek == fsFromLEOF) {
-		fcb->fcbCrPs = fcb->fcbEOF + pb->ioPosOffset;
+		// Check the on-disk EOF for concurrent modification
+		uint64_t cursize;
+		MF.GetEOF(fcb->fcb9Opaque, &cursize);
+		updateKnownLength(pb->ioRefNum, cursize);
+		pos = start = fcb->fcbEOF + pb->ioPosOffset;
 	} else if (seek == fsFromMark) {
-		fcb->fcbCrPs = fcb->fcbCrPs + pb->ioPosOffset;
+		pos = start = fcb->fcbCrPs + pb->ioPosOffset;
 	}
+	end = pos + pb->ioReqCount;
 
-	// Cannot position before start of file
-	if (fcb->fcbCrPs < 0) {
-		fcb->fcbCrPs = 0;
+	// Cannot position before start of file (like OS 9, unlike OS 7)
+	if (start < 0) {
+		pb->ioPosOffset = fcb->fcbCrPs;
 		return posErr;
 	}
 
+	// The zero-length case is likely GetFPos or SetFPos
+	if (start == end) {
+		if (start > fcb->fcbEOF) {
+			pb->ioPosOffset = fcb->fcbCrPs = fcb->fcbEOF;
+			return eofErr;
+		} else {
+			pb->ioPosOffset = fcb->fcbCrPs = start;
+			return noErr;
+		}
+	}
+
 	// Request the host
-	while (pb->ioActCount < pb->ioReqCount) {
-		uint32_t want = pb->ioReqCount - pb->ioActCount;
+	while (pos != end) {
+		int32_t want = end - pos;
 		if (want > Max9) want = Max9;
-		if (usestackbuf && want > sizeof stackbuf) want = sizeof stackbuf;
+
+		char *buf = pb->ioBuffer + pos - start;
+
+		// Discard a read into a ROM-based buffer
+		if (usescratch) {
+			if (want > sizeof scratch) want = sizeof scratch;
+			buf = scratch;
+		}
 
 		uint32_t got = 0;
-		int err;
+		MF.Read(fcb->fcb9Opaque, buf, pos, want, &got);
 
-		if (iswrite) {
-			char *buf = pb->ioBuffer + pb->ioActCount;
-			if (usestackbuf) {
-				memcpy(stackbuf, buf, want);
-				buf = stackbuf;
-			}
+		pos += got;
+		if (got != want) break;
+	}
 
-			err = MF.Write(fcb->fcb9Opaque, buf, fcb->fcbCrPs, want, &got);
-		} else {
-			char *buf = pb->ioBuffer + pb->ioActCount;
-			if (usestackbuf) {
-				buf = stackbuf; // discard: editing ROM is silently ignored
-			}
+	// File proves longer or shorter than expected
+	if (pos > fcb->fcbEOF || pos < end) {
+		updateKnownLength(pb->ioRefNum, pos);
+	}
 
-			err = MF.Read(fcb->fcb9Opaque, buf, fcb->fcbCrPs, want, &got);
-		}
+	pb->ioPosOffset = fcb->fcbCrPs = pos;
+	pb->ioActCount = pos - start;
+	if (pos != end) {
+		return eofErr;
+	} else {
+		return noErr;
+	}
+}
 
-		pb->ioActCount += got;
-		fcb->fcbCrPs += got;
+static OSErr fsWrite(struct IOParam *pb) {
+	// Writes from ROM are not supported by the 9P layer (fix this!)
+	char scratch[512];
+	bool usescratch = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
+
+	pb->ioActCount = 0;
+
+	struct FCBRec *fcb;
+	if (UnivResolveFCB(pb->ioRefNum, &fcb))
+		return paramErr;
+
+	int32_t start, end, pos;
+
+	char seek = pb->ioPosMode & 3;
+	if (seek == fsAtMark) {
+		pos = start = fcb->fcbCrPs;
+	} else if (seek == fsFromStart) {
+		pos = start = pb->ioPosOffset;
+	} else if (seek == fsFromLEOF) {
+		// Check the on-disk EOF for concurrent modification
+		uint64_t cursize;
+		MF.GetEOF(fcb->fcb9Opaque, &cursize);
+		updateKnownLength(pb->ioRefNum, cursize);
+		pos = start = fcb->fcbEOF + pb->ioPosOffset;
+	} else if (seek == fsFromMark) {
+		pos = start = fcb->fcbCrPs + pb->ioPosOffset;
+	}
+	end = pos + pb->ioReqCount;
+
+	// Cannot position before start of file (like OS 9, unlike OS 7)
+	if (start < 0) {
 		pb->ioPosOffset = fcb->fcbCrPs;
-
-		if (err) panic("io error... no idea what to do!");
-
-		if (got < want) break;
+		return posErr;
 	}
 
-	// Is the fork (now) longer than we thought?
-	if (pb->ioPosOffset > fcb->fcbEOF) {
-		if (pb->ioReqCount == 0) {
-			// Just a SetFPos, doesn't prove the file is longer
-			fcb->fcbCrPs = fcb->fcbEOF;
-			pb->ioPosOffset = fcb->fcbEOF;
-			return eofErr;
-		} else {
-			// Yes, a read/write succeeded beyond EOF, so the file is longer
-			// Tell all the other FCBs about this
-			short fellowFile = pb->ioRefNum;
-			FCBRec *fellowFCB;
-			for (;;) {
-				if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (RW)");
+	// Mac OS 9 (HFS and HFS+) writes uninitialized data to the file in this case!
+	if (start > fcb->fcbEOF) {
+		pb->ioPosOffset = fcb->fcbCrPs = fcb->fcbEOF;
+		return eofErr;
+	}
 
-				fellowFCB->fcbEOF = pb->ioPosOffset;
+	// Request the host
+	while (pos != end) {
+		int32_t want = end - pos;
+		if (want > Max9) want = Max9;
 
-				fellowFile = fellowFCB->fcb9Link;
-				if (fellowFile == pb->ioRefNum) break;
-			}
+		char *buf = pb->ioBuffer + pos - start;
+
+		// Copy the data into RAM before the 9P call
+		if (usescratch) {
+			if (want > sizeof scratch) want = sizeof scratch;
+			BlockMoveData(buf, scratch, want);
+			buf = scratch;
 		}
+
+		uint32_t got = 0;
+		MF.Write(fcb->fcb9Opaque, buf, pos, want, &got);
+
+		pos += got;
+		if (got != want) panic("write call incomplete");
 	}
 
-	if (pb->ioActCount != pb->ioReqCount) {
-		if (iswrite) {
-			return ioErr; // this shouldn't really happen
-		} else {
-			return eofErr;
-		}
+	// File is now longer
+	if (pos > fcb->fcbEOF) {
+		updateKnownLength(pb->ioRefNum, pos);
 	}
 
+	pb->ioPosOffset = fcb->fcbCrPs = pos;
+	pb->ioActCount = pos - start;
 	return noErr;
 }
 
@@ -1955,8 +2012,8 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	switch (selector & 0xf0ff) {
 	case kFSMOpen: return fsOpen(pb);
 	case kFSMClose: return fsClose(pb);
-	case kFSMRead: return fsReadWrite(pb);
-	case kFSMWrite: return fsReadWrite(pb);
+	case kFSMRead: return fsRead(pb);
+	case kFSMWrite: return fsWrite(pb);
 	case kFSMGetVolInfo: return fsGetVolInfo(pb);
 	case kFSMCreate: return fsCreate(pb);
 	case kFSMDelete: return fsDelete(pb);
@@ -1973,12 +2030,12 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMGetVol: return extFSErr; // FM handles
 	case kFSMSetVol: return fsSetVol(pb);
 	case kFSMEject: return extFSErr;
-	case kFSMGetFPos: return fsReadWrite(pb);
+	case kFSMGetFPos: return fsRead(pb);
 	case kFSMOffline: return extFSErr;
 	case kFSMSetFilLock: return extFSErr;
 	case kFSMRstFilLock: return extFSErr;
 	case kFSMSetFilType: return extFSErr;
-	case kFSMSetFPos: return fsReadWrite(pb);
+	case kFSMSetFPos: return fsRead(pb);
 	case kFSMFlushFile: return noErr;
 	case kFSMOpenWD: return fsOpenWD(pb);
 	case kFSMCloseWD: return fsCloseWD(pb);
