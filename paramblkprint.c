@@ -426,13 +426,9 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			       "ioReqCount36l "
 			       "ioPosMode44w "
 			       "ioPosOffset46l";
-		} else if (status == 0) {
-			// return on noErr
+		} else {
 			return "ioActCount40l "
 			       "ioPosOffset46l";
-		} else {
-			// return on failure
-			return "";
 		}
 	case 0xa003: // Write
 		if (status > 0) {
@@ -442,13 +438,9 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			       "ioReqCount36l "
 			       "ioPosMode44w "
 			       "ioPosOffset46l";
-		} else if (status == 0) {
-			// return on noErr
+		} else {
 			return "ioActCount40l "
 			       "ioPosOffset46l";
-		} else {
-			// return on failure
-			return "";
 		}
 	case 0xa004: // Control
 		if (status > 0) {
