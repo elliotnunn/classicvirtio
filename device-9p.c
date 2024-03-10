@@ -793,7 +793,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	Clunk9(FID1);
 
 	struct MFAttr attr;
-	MF.DGetAttr(fid, getDBName(cnid), MF_FINFO, &attr);
+	MF.DGetAttr(cnid, fid, getDBName(cnid), MF_FINFO, &attr);
 
 	// Clear fields from ioFlAttrib onward
 	memset((char *)pb + 30, 0, 100 - 30);
@@ -810,7 +810,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 	struct MFAttr attr;
-	MF.FGetAttr(fid, getDBName(cnid), MF_DSIZE|MF_RSIZE|MF_TIME|MF_FINFO, &attr);
+	MF.FGetAttr(cnid, fid, getDBName(cnid), MF_DSIZE|MF_RSIZE|MF_TIME|MF_FINFO, &attr);
 
 	// Determine whether the file is open
 	bool openRF = false, openDF = false;
@@ -865,9 +865,9 @@ static OSErr fsSetFileInfo(struct HFileInfo *pb) {
 	memcpy(attr.fxinfo, &pb->ioFlXFndrInfo, sizeof pb->ioFlXFndrInfo); // same field as ioDrFndrInfo
 
 	if (isdir(cnid)) {
-		MF.DSetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
+		MF.DSetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
 	} else {
-		MF.FSetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
+		MF.FSetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
 	}
 
 	return noErr;
@@ -1000,7 +1000,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	else if (err) return ioErr;
 
 	struct MFAttr attr = {};
-	MF.FGetAttr(FID1, getDBName(cnid), MF_FINFO, &attr);
+	MF.FGetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
 
 	uint64_t size;
 	MF.GetEOF(opaque, &size);

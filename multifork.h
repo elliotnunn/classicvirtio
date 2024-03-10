@@ -43,10 +43,10 @@ struct MFImpl {
 	int (*Write)(void *opaque, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 	int (*GetEOF)(void *opaque, uint64_t *len);
 	int (*SetEOF)(void *opaque, uint64_t len);
-	int (*FGetAttr)(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
-	int (*FSetAttr)(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
-	int (*DGetAttr)(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
-	int (*DSetAttr)(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
+	int (*FGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
+	int (*FSetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
+	int (*DGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
+	int (*DSetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
 	int (*Move)(uint32_t fid1, const char *name1, uint32_t fid2, const char *name2);
 	int (*Del)(uint32_t fid, const char *name, bool isdir);
 	bool (*IsSidecar)(const char *name);

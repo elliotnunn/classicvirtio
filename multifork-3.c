@@ -244,7 +244,7 @@ static int seteof3(void *opaque, uint64_t len) {
 	return 0;
 }
 
-int fgetattr3(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
+int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
 	// To be really clear, all these fields are zero until proven otherwise
 	memset(attr, 0, sizeof *attr);
 
@@ -297,7 +297,7 @@ int fgetattr3(uint32_t fid, const char *name, unsigned fields, struct MFAttr *at
 	return 0;
 }
 
-int fsetattr3(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
+int fsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
 	// (This function never needs to truncate/extend the file)
 
 	// For now, let us not implement time-setting
@@ -324,13 +324,13 @@ int fsetattr3(uint32_t fid, const char *name, unsigned fields, const struct MFAt
 	return 0;
 }
 
-int dgetattr3(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
+int dgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
 	// Benignly unimplemented
 	memset(attr, 0, sizeof *attr);
 	return 0;
 }
 
-int dsetattr3(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
+int dsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
 	// Benignly unimplemented
 	return 0;
 }

@@ -201,7 +201,7 @@ static int seteof1(void *opaque, uint64_t len) {
 	return 0;
 }
 
-int fgetattr1(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
+int fgetattr1(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
 	// To be really clear, all these fields are zero until proven otherwise
 	memset(attr, 0, sizeof *attr);
 
@@ -239,7 +239,7 @@ int fgetattr1(uint32_t fid, const char *name, unsigned fields, struct MFAttr *at
 	return 0;
 }
 
-int fsetattr1(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
+int fsetattr1(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
 	// (This function never needs to truncate/extend the file)
 
 	printf("fsetattr1\n");
@@ -267,13 +267,13 @@ int fsetattr1(uint32_t fid, const char *name, unsigned fields, const struct MFAt
 	return 0;
 }
 
-int dgetattr1(uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
+int dgetattr1(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr) {
 	// Benignly unimplemented
 	memset(attr, 0, sizeof *attr);
 	return 0;
 }
 
-int dsetattr1(uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
+int dsetattr1(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr) {
 	// Benignly unimplemented
 	return 0;
 }
