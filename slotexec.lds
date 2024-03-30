@@ -20,10 +20,14 @@ SECTIONS {
 		LONG(4); /* offset to code */
 
 		/* Thunk for C calling convention */
+		SHORT(0x48e7);   /* movem.l          */
+		SHORT(0xfffe);   /*         d0-d7/a0-a6,-(sp) */
 		SHORT(0x2f08);   /* move.l  a0,-(sp) */
 		SHORT(0x6100);   /* bsr.s            */
 		SHORT(exec - .); /*         exec     */
 		SHORT(0x584f);   /* addq    #4,sp    */
+		SHORT(0x4cdf);   /* movem.l          */
+		SHORT(0x7fff);   /*         (sp)+,d0-d7/a0-a6 */
 		SHORT(0x4e75);   /* rts              */
 
 		/* Code and data */
