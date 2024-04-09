@@ -613,7 +613,8 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
 	if (GetVCBQHdr()->qHead == NULL) {
-		LMSetDefVCBPtr((Ptr)&vcb);
+		*(short *)0x352 = (long)&vcb >> 16; // DefVCBPtr
+		*(short *)0x354 = (long)&vcb;
 		*(short *)0x384 = vcb.vcbVRefNum; // DefVRefNum
 
 		memcpy(findWD(0),

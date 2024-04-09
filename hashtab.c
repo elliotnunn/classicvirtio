@@ -63,7 +63,7 @@ static void dump(void);
 // Calls the Memory Manager -- only when moving memory is safe
 // e.g. "system task time" or a synchronous Open call
 void HTallocate(void) {
-	short saveMemErr = LMGetMemErr();
+	short saveMemErr = *(short *)0x220;
 
 	size_t newtablesize = chooseTableSize();
 
@@ -101,7 +101,7 @@ void HTallocate(void) {
 		printf("Hash table storage bytes: %d\n", blobsize);
 	}
 
-	LMSetMemErr(saveMemErr);
+	*(short *)0x220 = saveMemErr;
 }
 
 static size_t chooseTableSize(void) {
