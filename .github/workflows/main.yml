@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload pre-release
         if: "${{ github.ref_name == 'main' }}"
-        uses: "marvinpinto/action-automatic-releases@latest"
+        uses: "crowbarmaster/GH-Automatic-Releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: true
