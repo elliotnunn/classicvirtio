@@ -87,39 +87,13 @@ struct longdqe {
 	void *dispatcher;
 };
 
-struct bootBlock {
-	uint16_t magic;
-	uint32_t entryBRA;
-	uint16_t version;
-	uint16_t page2flags;
-	unsigned char systemFileName[16];
-	unsigned char finderFileName[16];
-	unsigned char debuggerFileName[16];
-	unsigned char disassemblerFileName[16];
-	unsigned char startupScreenFileName[16];
-	unsigned char helloFileName[16];
-	unsigned char clipboardFileName[16];
-	uint16_t numFCBs;
-	uint16_t numEvents;
-	uint32_t sysHeapSize128k;
-	uint32_t sysHeapSize256k;
-	uint32_t sysHeapSize;
-	uint16_t alignPad; // keep the delicate PPC structures 4-byte aligned
-#if GENERATINGCFM
-	RoutineDescriptor rd;
-#else
-	uint16_t jmp;
-	void *routine;
-#endif
-} __attribute__((packed));
-
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installDrive(void);
 static void installExtFS(void);
 static void ensureFutureMount(void);
 static void lateBootHook(void);
-static OSErr boot(void);
+static void getBootBlocks(void);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
@@ -170,31 +144,8 @@ static int pathBlobSize;
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
-static struct bootBlock bootBlock = {
-	.magic = 0x4c4b,
-	.entryBRA = 0x60000088,
-	.version = 0x4418,
-	.page2flags = 0,
-	.systemFileName = "\x06" "System",
-	.finderFileName = "\x06" "Finder",
-	.debuggerFileName = "\x07" "MacsBug",
-	.disassemblerFileName = "\x0c""Disassembler",
-	.startupScreenFileName = "\x0d" "StartUpScreen",
-	.helloFileName = "\x06" "Finder",
-	.clipboardFileName = "\x09" "Clipboard",
-	.numFCBs = 10,
-	.numEvents = 20,
-	.sysHeapSize128k = 0x4300,
-	.sysHeapSize256k = 0x8000,
-	.sysHeapSize = 0x20000,
-	.alignPad = 0,
-#if GENERATINGCFM
-	.rd = BUILD_ROUTINE_DESCRIPTOR(kCStackBased | RESULT_SIZE(kTwoByteCode), boot),
-#else
-	.jmp = 0x4ef9,
-	.routine = &boot,
-#endif
-};
+static char bootBlocks[1024];
+
 static struct longdqe dqe = {
 	.writeProt = 0,
 	.diskInPlace = 8, // ???
@@ -224,7 +175,6 @@ static struct GetVolParmsInfoBuffer vparms = {
 		| (1<<bNoMiniFndr)
 		| (1<<bNoLclSync)
 		| (1<<bTrshOffLine)
-		| (1<<bNoBootBlks)
 		| (1<<bHasExtFSVol)
 		| (1<<bLocalWList)
 		,
@@ -275,8 +225,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		struct IOParam *param = &pb.pb->ioParam;
 		param->ioActCount = param->ioReqCount;
 		for (long i=0; i<param->ioReqCount; i++) {
-			if (param->ioPosOffset+i < sizeof bootBlock) {
-				param->ioBuffer[i] = ((char *)&bootBlock)[i];
+			if (param->ioPosOffset+i < sizeof bootBlocks) {
+				param->ioBuffer[i] = bootBlocks[i];
 			} else {
 				param->ioBuffer[i] = 0;
 			}
@@ -388,8 +338,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 	installDrive();
 
 	int32_t systemFolder = browse(FID1, 2 /*cnid*/, "\pSystem Folder");
-	vcb.vcbFndrInfo[0] = systemFolder>0 ? systemFolder : 0;
-	printf("System Folder: %s\n", systemFolder>0 ? "present" : "absent");
+	vcb.vcbFndrInfo[0] = iserr(systemFolder) ? 0 : systemFolder;
+	printf("System Folder: %s\n", iserr(systemFolder) ? "absent" : "present");
+	if (!iserr(systemFolder)) {
+		getBootBlocks();
+	}
 
 	printf("File Manager: %s\n", GetVCBQHdr()->qHead != (void *)-1 ? "present" : "absent");
 
@@ -546,59 +499,68 @@ static void lateBootHook(void) {
 	}
 }
 
-// C function that our stub boot block will jump to.
-// Do the job of a System 7 boot block: load and run System resource 'boot' 2.
-// Not worth checking return values: if boot fails then the reason is clear enough
-static OSErr boot(void) {
-	printf("Emulating boot block\n");
+// I want to be able to boot from a folder without MacOS "blessing" it
+// so I need to find the System file, extract boot 1 resource, and close it.
+// At this stage we are a drive, not a volume, so there is only block-level access
+// ... but we need to access a resource fork ... so do some funky stuff.
+static void getBootBlocks(void) {
+	int32_t cnid = browse(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem");
+	if (iserr(cnid)) return;
 
-	// Populate low memory from the declarative part of the boot block.
-	// (We use the copy from our own globals. There is a copy A5+0x270.)
-	memcpy((void *)0xad8, bootBlock.systemFileName, 16); // SysResName
-	memcpy((void *)0x2e0, bootBlock.finderFileName, 16); // FinderName
-	memcpy((void *)0x970, bootBlock.clipboardFileName, 16); // ScrapTag
-	*(void **)0x96c = (void *)0x970; // ScrapName pointer --> ScrapTag string
+	uint64_t opaque[3] = {};
+	int err = MF.Open(opaque, 0 /*unrealisted refnum*/, cnid, FID1, getDBName(cnid), true /*rfork*/, false /*write*/);
+	if (err) return;
 
-#if GENERATINGCFM
-	CallOSTrapUniversalProc(GetOSTrapAddress(_InitEvents), 0x33802, _InitEvents, 20);
-#else
-	__asm__ __volatile__("move.w #20,%%d0; .short 0xa06d;" ::: "memory");
-#endif
+	uint32_t content;
+	if (MF.Read(opaque, &content, 0, 4, NULL)) return;
 
-	// When we are the boot disk, we control when the File Manager comes up: now!
-#if GENERATINGCFM
-	CallOSTrapUniversalProc(GetOSTrapAddress(_InitFS), 0x33802, _InitFS, 10);
-#else
-	asm volatile("move.w #10,%%d0; .short 0xa06c;" ::: "memory");
-#endif
+	uint32_t map;
+	if (MF.Read(opaque, &map, 4, 4, NULL)) return;
 
-	struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
-	PBMountVol((void *)&pb);
+	uint16_t tloffset; // type list
+	if (MF.Read(opaque, &tloffset, map + 24, 2, NULL)) return;
+	uint32_t tl = map + tloffset;
 
-	// Is the System Folder not the root of the disk? (It usually isn't.)
-	// Make it a working directory and call that the default (fake) volume.
-	if (vcb.vcbFndrInfo[0] > 2) {
-		struct WDPBRec pb = {
-			.ioVRefNum = vcb.vcbVRefNum,
-			.ioWDDirID = vcb.vcbFndrInfo[0],
-			.ioWDProcID = 'ERIK',
-		};
-		PBOpenWDSync((void *)&pb);
-		PBSetVolSync((void *)&pb);
+	uint16_t nt;
+	if (MF.Read(opaque, &nt, tl, 2, NULL)) return;
+	nt++; // ffff means zero types
+
+	for (uint16_t i=0; i<nt; i++) {
+		uint32_t t = tl + 2 + 8*i;
+
+		uint32_t tcode;
+		if (MF.Read(opaque, &tcode, t, 4, NULL)) return;
+		if (tcode != 'boot') continue;
+
+		uint16_t nr; // n(resources of this type)
+		uint16_t r1; // first resource of this type
+		if (MF.Read(opaque, &nr, t+4, 2, NULL)) return;
+		if (MF.Read(opaque, &r1, t+6, 2, NULL)) return;
+		nr++; // "0" meant "one resource"
+
+		for (uint16_t j=0; j<nr; j++) {
+			uint32_t r = tl + r1 + 12*j;
+
+			uint16_t id;
+			if (MF.Read(opaque, &id, r, 2, NULL)) return;
+			if (id != 1) continue;
+
+			uint32_t off;
+			if (MF.Read(opaque, &off, r+4, 4, NULL)) return;
+			off &= 0xffffff;
+
+			uint32_t len;
+			if (MF.Read(opaque, &len, content+off, 4, NULL)) return;
+
+			if (len > 1024) len = 1024;
+			MF.Read(opaque, bootBlocks, content+off+4, len, NULL);
+
+			return; // success
+		}
+
+		printf("%d resources of the relevant type\n", nr);
+		panic("ok");
 	}
-
-	// Next startup stage
-	InitResources();
-	Handle boot2hdl = GetResource('boot', 2);
-
-	// boot 2 resource requires a3=handle and a4=startup app dirID
-	// movem.l (sp),a0/a3/a4; move.l (a3),-(sp); rts
-	static short thunk[6] = {0x4cd7, 0x1900, 0x2f13, 0x4e75};
-	BlockMove(thunk, thunk, sizeof thunk);
-
-	// Call boot 2, never to return
-	printf("Jumping to boot 2 resource\n");
-	CALL2(void, thunk, Handle, boot2hdl, long, vcb.vcbFndrInfo[0]);
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
