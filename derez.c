@@ -10,12 +10,12 @@
 
 // Escape code lookup table for quoted strings
 // (needs tweaking to switch between single and double quoted strings)
-char lut[5*256] =
+static const char lut[5*256] =
 	"\\0x00"     "\\0x01"     "\\0x02"     "\\0x03"     "\\0x04"     "\\0x05"     "\\0x06"     "\\0x07"
 	"\\b\0\0\0"  "\\t\0\0\0"  "\\r\0\0\0"  "\\v\0\0\0"  "\\f\0\0\0"  "\\n\0\0\0"  "\\0x0E"     "\\0x0F"
 	"\\0x10"     "\\0x11"     "\\0x12"     "\\0x13"     "\\0x14"     "\\0x15"     "\\0x16"     "\\0x17"
 	"\\0x18"     "\\0x19"     "\\0x1A"     "\\0x1B"     "\\0x1C"     "\\0x1D"     "\\0x1E"     "\\0x1F"
-	" \0\0\0\0"  "!\0\0\0\0"  "\"\0\0\0\0" "#\0\0\0\0"  "$\0\0\0\0"  "%\0\0\0\0"  "&\0\0\0\0"  "\\'\0\0\0"
+	" \0\0\0\0"  "!\0\0\0\0"  "\"\0\0\0\0" "#\0\0\0\0"  "$\0\0\0\0"  "%\0\0\0\0"  "&\0\0\0\0"  "'\0\0\0\0"
 	"(\0\0\0\0"  ")\0\0\0\0"  "*\0\0\0\0"  "+\0\0\0\0"  ",\0\0\0\0"  "-\0\0\0\0"  ".\0\0\0\0"  "/\0\0\0\0"
 	"0\0\0\0\0"  "1\0\0\0\0"  "2\0\0\0\0"  "3\0\0\0\0"  "4\0\0\0\0"  "5\0\0\0\0"  "6\0\0\0\0"  "7\0\0\0\0"
 	"8\0\0\0\0"  "9\0\0\0\0"  ":\0\0\0\0"  ";\0\0\0\0"  "<\0\0\0\0"  "=\0\0\0\0"  ">\0\0\0\0"  "?\0\0\0\0"
@@ -49,22 +49,18 @@ void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	char header[512] = "data '";
 	char *p = header + 6;
 
-	strcpy(lut + 5*'\'', "\\'");
-	strcpy(lut + 5*'"', "\"");
-
 	for (int i=0; i<4; i++) {
 		p = stpcpy(p, lut + 5*(unsigned char)type[i]);
+		if (p[-1] == '\'') p = stpcpy(p-1, "\\'"); // escape single quote
 	}
 
 	p += sprintf(p, "' (%d", id);
 
 	if (name) {
-		strcpy(lut + 5*'\'', "'");
-		strcpy(lut + 5*'"', "\\\"");
-
 		p = stpcpy(p, ", \"");
 		for (uint8_t i=0; i<name[0]; i++) {
 			p = stpcpy(p, lut + 5*(unsigned char)name[i+1]);
+			if (p[-1] == '"') p = stpcpy(p-1, "\\\""); // escape double quote
 		}
 		*p++ = '"';
 	}
