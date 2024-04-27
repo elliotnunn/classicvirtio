@@ -29,7 +29,7 @@ SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(SUPPORT))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 
 # Settle a dispute between MacTypes.h and stdbool.h
-CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0
+CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
 
 ############################# CLASSIC DRVR #############################
 
