@@ -125,9 +125,9 @@ void _putchar(char character) {
 
 // support for the long long types (%llu or %p)
 // default: activated
-#ifndef PRINTF_DISABLE_SUPPORT_LONG_LONG
-#define PRINTF_SUPPORT_LONG_LONG
-#endif
+// #ifndef PRINTF_DISABLE_SUPPORT_LONG_LONG
+// #define PRINTF_SUPPORT_LONG_LONG
+// #endif
 
 // support for the ptrdiff_t type (%t)
 // ptrdiff_t is normally defined in <stddef.h> as long or long long type
