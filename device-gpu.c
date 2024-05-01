@@ -19,7 +19,7 @@
 #include "allocator.h"
 #include "atomic.h"
 #include "blit.h"
-#include "callupp.h"
+#include "callin68k.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
 #include "printf.h"
@@ -185,9 +185,6 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
-const char drvrNameVers[] = "\x1b.Display_Video_Apple_Virtio\x01\x00";
-
 static const char *controlNames[] = {
 	"Reset",                        // 0
 	"KillIO",                       // 1
@@ -328,7 +325,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
 
-	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
+	sprintf(logprefix, ".Display_Video_Apple_Virtio(%d) ", info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 // 		logenable = 1;
 // 	}
@@ -413,7 +410,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"4eb9 %l"       //      jsr     debugPoll
 		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
 		"4ef9 %o",      // old: jmp     originalDebugUtil
-		STATICDESCRIPTOR(debugPoll, kCStackBased)
+		CALLIN68K_C_ARG0_FUNCDEF(debugPoll)
 	);
 
 	// We can only patch drawing code *after* QuickDraw is fully installed,
@@ -433,7 +430,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"6106"          //      bsr.s   uninstall
 		"4ef9 %o",      // old: jmp     originalGestalt
 		                // uninstall: (fallthrough code)
-		STATICDESCRIPTOR(lateBootHook, kCStackBased)
+		CALLIN68K_C_ARG0_FUNCDEF(lateBootHook)
 	);
 
 	return noErr;

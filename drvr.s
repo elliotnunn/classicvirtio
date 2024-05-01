@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Elliot Nunn */
+/* Copyright (c) 2023-2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
 /*
@@ -7,32 +7,33 @@ The linker script implements the DRVR header
 The DoDriverIO routine (in C) does the work
 */
 
-	.global drvrOpen, drvrClose, drvrControl, drvrStatus, drvrPrime, dce
+	.global drvrROMEntry
 	.global IOCommandIsComplete
-	.global drvrStart, relocationList
 
-	.section .text.drvr
-drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
+	.section .text.drvrROMEntry
+drvrROMEntry:
 
-	movem.l %d2/%a0/%a1,-(%sp)      /* save registers */
+/* DRVR stub pushed the old A5, and set A5 to the data ptr, and JMPed here */
 
-/* Push a DriverInitInfo/DriverFinalInfo struct */
+	movem.l %d2/%a0/%a1,-(%sp)      /* save more registers */
+
+/* Push a DriverInitInfo/DriverFinalInfo struct, but don't fill it in */
 	sub.w   #18,%sp
 
 	moveq.l #0,%d0
 	move.b  7(%a0),%d0              /* ioTrap number */
 
+/* Push arguments */
 	pea     4                       /* IOCommandKind = immed */
 	move.l  %d0,-(%sp)              /* IOCommandCode */
 	move.l  %a0,-(%sp)              /* IOCommandContents */
 	clr.l   -(%sp)                  /* IOCommandID */
 	move.l  #-1,-(%sp)              /* AddressSpaceID */
 
-/* Special case for Open and Close calls */
+/* Special case for Open/Close calls: */
+/* Convert to Initialize/Finalize, emulating the NDRV runtime */
 	cmp.b   #1,%d0
 	bhi.s   notOpenOrClose
-
-	bsr     fixUpPointers
 
 	lea     20(%sp),%a0             /* replace PB with init/final info */
 	move.l  %a0,8(%sp)
@@ -44,18 +45,13 @@ drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
 	addq.l  #7,12(%sp)              /* convert IOCommandCode */
 notOpenOrClose:
 
-/* Opportunistically set DCE global */
-	lea     dce(%pc),%a0
-	move.l  %a1,(%a0)
-
-	jsr     DoDriverIO
+/* DO IT, then clean up registers */
+	bsr.l   DoDriverIO
 	add.w   #20+18,%sp
-
-	movem.l (%sp)+,%d2/%a0/%a1
-
-	move.w  6(%a0),%d1              /* get PB.ioTrap */
+	movem.l (%sp)+,%d2/%a0/%a1/%a5  /* we saved some, the DRVR stub saved A5 */
 
 /* Peculiarly Open touches ioResult */
+	move.w  6(%a0),%d1              /* get PB.ioTrap */
 	tst.b   %d1
 	bne.s   notOpenDontTouchResult
 	move.w  %d0,16(%a0)
@@ -67,42 +63,9 @@ notOpenDontTouchResult:
 	move.l  0x8fc,-(%sp)            /* jIODone */
 returnDirectly:
 	rts
-	.byte   0x84
-	.ascii  "DRVR"
+	.byte   0x8c
+	.ascii  "drvrROMEntry"
 	.align  2
-
-
-/* The post-link shell script creates a list of "interior pointers" */
-/* Iterate the list and turn those pointers into real addresses */
-/* Idempotent: replaces self with a simple rts after being run */
-/* Important to use pc-relative addressing or we have a bootstrap problem */
-fixUpPointers:
-	movem.l %d0-%d1/%a0-%a2,-(%sp)
-	lea     relocationZero(%pc),%a0 /* a0 = base register */
-	move.l  %a0,%d0                 /* d0 = base register too */
-	lea.l   relocationList,%a1      /* a1 = relocation list */
-	add.l   %d0,%a1                 /* hack: can't use 16-bit pc-relative lea */
-
-1$:
-	move.l  (%a1)+,%d1              /* d1 = relocation offset */
-	beq.s   2$
-	lea     (%a0,%d1.l),%a2         /* a2 = address of ptr */
-	add.l   %d0,(%a2)
-	bra.s   1$
-2$:
-
-	lea     fixUpPointers(%pc),%a2  /* Self-modify: never run this func again */
-	move.w  #0x4e75,(%a2)
-
-	move.l  %a1,%d0                 /* To clear the 68k code cache... */
-	sub.l   %a0,%d0
-	move.l  %a0,%a1
-	.short  0xa02e                  /* BlockMove-in-place! */
-
-	movem.l (%sp)+,%d0-%d1/%a0-%a2
-3$:
-	rts
-
 
 whichDeviceInSlot: /* expect DCE ptr in a1, return slot and index in d0/d1 */
 	movem.l %d2-%d4/%a0-%a2,-(%sp)
@@ -138,8 +101,3 @@ IOCommandIsComplete:
 	moveq.l #0,%d0
 	move.w  8(%sp),%d0
 	rts
-
-
-	.section .bss
-dce:
-	.long   0                       /* extern struct DCtlEntry *dce; */

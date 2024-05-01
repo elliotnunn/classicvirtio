@@ -3,7 +3,6 @@
 
 #include <Gestalt.h>
 #include <Memory.h>
-#include <MixedMode.h>
 #include <Patches.h>
 
 #include <stdarg.h>
@@ -11,7 +10,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "callupp.h"
 #include "printf.h"
 
 #include "patch68k.h"
@@ -29,7 +27,9 @@ static int hex(char c) {
 }
 
 static void *getvec(long vec) {
-	if (vec & 0xffff0000) {
+	if (vec == 0) {
+		return NULL;
+	} if (vec & 0xffff0000) {
 		return NULL; // GetGestaltProcPtr is sometimes unavailable
 	} else if ((vec & 0xa800) == 0xa800) {
 		return GetToolTrapAddress(vec);
@@ -41,7 +41,9 @@ static void *getvec(long vec) {
 }
 
 static void setvec(long vec, void *addr) {
-	if (vec & 0xffff0000) {
+	if (vec == 0) {
+		// no nothing
+	} if (vec & 0xffff0000) {
 		SelectorFunctionUPP old;
 		if (NewGestalt(vec, addr) != noErr)
 			ReplaceGestalt(vec, addr, &old);
@@ -111,6 +113,7 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 			} else if (*i >= 'A' && *i <= 'Z') {
 				fixups[nfixups++] = code - block->code;
 				*code++ = *i;
+				if ((code - block->code) & 1) code++;
 				i++;
 				while (*i >= 'A' && *i <= 'Z') i++; // ignore extra letters
 			}
@@ -151,21 +154,22 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	*code++ = 0xe0;
 	*code++ = 0xe0;
 
-	*code++ = 0x48; // PEA code
-	*code++ = 0x7a;
+	*code++ = 0x41; // LEA copycode,a0
+	*code++ = 0xfa;
+	*code++ = 0x00;
+	*code++ = 0x10;
+
+	*code++ = 0x43; // LEA entry,a1
+	*code++ = 0xfa;
 	short delta = block->code - code;
 	*code++ = delta >> 8;
 	*code++ = delta;
 
-	void *unpatcher = STATICDESCRIPTOR(Unpatch68k,
-		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode));
+	*code++ = 0x70; // MOVEQ.L #12,d0
+	*code++ = 0x0c;
 
-	*code++ = 0x4e; // JSR Unpatch68k
-	*code++ = 0xb9;
-	*code++ = (unsigned long)unpatcher >> 24;
-	*code++ = (unsigned long)unpatcher >> 16;
-	*code++ = (unsigned long)unpatcher >> 8;
-	*code++ = (unsigned long)unpatcher;
+	*code++ = 0xa0; // _BlockMove
+	*code++ = 0x2e;
 
 	*code++ = 0x4c; // MOVEM.L (sp)+,d0-d2/a0-a2
 	*code++ = 0xdf;
@@ -174,6 +178,20 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 
 	*code++ = 0x4e; // RTS
 	*code++ = 0x75;
+
+	// COPYCODE: (12 bytes to force BlockMove to clear the icache)
+	if (block->original) {
+		*code++ = 0x4e; // JMP
+		*code++ = 0xf9;
+		*code++ = (unsigned long)block->original >> 24;
+		*code++ = (unsigned long)block->original >> 16;
+		*code++ = (unsigned long)block->original >> 8;
+		*code++ = (unsigned long)block->original;
+	} else {
+		*code++ = 0x4e; // RTS
+		*code++ = 0x75;
+	}
+	code += 10; // at least 12 bytes for BlockMove to block-move
 
 	BlockMove(block, block, sizeof *block); // clear 68k emulator cache
 	SetPtrSize((Ptr)block, (char *)code - (char *)block); // shrink
@@ -193,34 +211,4 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	}
 
 	return &block->code;
-}
-
-pascal void Unpatch68k(void *patch) {
-	struct block *block = patch - offsetof(struct block, code);
-
-	if (getvec(block->vector) == &block->code) {
-		// yay, we never got over-patched
-		printf("Unpatched %X back to %p\n", block->vector, block->original);
-
-		setvec(block->vector, block->original);
-		DisposePtr((Ptr)block);
-	} else {
-		// someone over-patched us! yuck...
-		if ((long)block->original == 0 || (long)block->original == -1) {
-			// As always, never jump to a nonexistent address
-			block->code[0] = 0x4e; // RTS
-			block->code[1] = 0x75;
-		} else {
-			block->code[0] = 0x4e; // JMP
-			block->code[1] = 0xb9;
-			memcpy(block->code+2, &block->original, 4);
-		}
-		BlockMove(block, block, 14); // clear 68k emulator cache
-
-		printf("Unpatched %#x using a thunk:\n   ", block->vector);
-		for (unsigned char *i=block->code; i<block->code+6; i+=2) {
-			printf(" %02x%02x", i[0], i[1]);
-		}
-		printf("\n");
-	}
 }

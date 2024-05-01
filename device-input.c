@@ -8,7 +8,7 @@
 #include <Types.h>
 
 #include "allocator.h"
-#include "callupp.h"
+#include "callout68k.h"
 #include "printf.h"
 #include "panic.h"
 #include "transport.h"
@@ -46,9 +46,6 @@ DriverDescription TheDriverDescription = {
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
-
-const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
-const char drvrNameVers[] = "\x0c.VirtioInput\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -97,7 +94,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
+	sprintf(logprefix, ".VirtioInput(%d) ", info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 // 		logenable = 1;
 // 	}

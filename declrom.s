@@ -216,11 +216,11 @@ CicnEnd:
 Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
-	OSLstEntry sRsrcDrvrDir, 3$
 	OSLstEntry sRsrcLoadRec, SharedDriverLoader
 	OSLstEntry sRsrcBootRec, BootRec
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
+	OSLstEntry 199, 3$
 	DatLstEntry endOfList, 0
 1$:
 	.short catCPU
@@ -231,16 +231,15 @@ Resource9P:
 	.asciz "Virtio9P" /* without a leading dot */
 	.align 2
 3$:
-	OSLstEntry sCPU_68020, Driver9P
-	DatLstEntry endOfList, 0
+	.incbin "build/classic/drvr-9p.elf"
 
 ResourceInput:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
-	OSLstEntry sRsrcDrvrDir, 3$
 	OSLstEntry sRsrcLoadRec, SharedDriverLoader
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
+	OSLstEntry 199, 3$
 	DatLstEntry endOfList, 0
 1$:
 	.short catCPU
@@ -251,8 +250,7 @@ ResourceInput:
 	.asciz "VirtioInput" /* without a leading dot */
 	.align 2
 3$:
-	OSLstEntry sCPU_68020, DriverInput
-	DatLstEntry endOfList, 0
+	.incbin "build/classic/drvr-input.elf"
 
 /* Work around the 64K driver limitation in the Slot Manager */
 SharedDriverLoader:
@@ -260,19 +258,6 @@ SharedDriverLoader:
 
 BootRec:
 	.incbin "build/classic/slotexec-boot"
-
-/* Include the DRVR binaries (don't duplicate like sResources!) */
-Driver9P:
-	.long 9$-.
-	.incbin "build/classic/drvr-9p"
-	.align 2
-9$:
-
-DriverInput:
-	.long 9$-.
-	.incbin "build/classic/drvr-input"
-	.align 2
-9$:
 
 /* Pad so that, after the header, this ROM is a multiple of 4K */
 /* Works around a suspected QEMU bug: */

@@ -33,7 +33,7 @@ not used because it is unavailable at the start of the boot process.
 #include <Start.h>
 #include <Traps.h>
 
-#include "callupp.h"
+#include "callin68k.h"
 #include "device.h"
 #include "hashtab.h"
 #include "multifork.h"
@@ -116,21 +116,10 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
 static int32_t getDBParent(int32_t cnid);
 int32_t mactime(int64_t unixtime);
-static long fsCall(void *pb, long selector, void *stack);
+static long fsCall(void *pb, long selector);
 static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static OSErr controlStatusDispatch(long selector, void *pb);
-
-#if GENERATINGCFM
-static struct RoutineDescriptor fsCallDesc = BUILD_ROUTINE_DESCRIPTOR(
-	kCStackBased
-		| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-		| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-		| RESULT_SIZE(kFourByteCode),
-	fsCall);
-#else
-#define fsCallDesc fsCall
-#endif
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -152,7 +141,7 @@ static struct longdqe dqe = {
 	.installed = 1,
 	.sides = 0,
 	.dqe = {.dQFSID = FSID},
-	.dispatcher = &fsCallDesc, // procedure for our ToExtFS patch
+	.dispatcher = CALLIN68K_C_ARG44_GLOBDEF(fsCall), // procedure for our ToExtFS patch
 };
 static struct VCB vcb = {
 	.vcbAtrb = 0x0000, // no locks
@@ -167,7 +156,7 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
-	.vcbCtlBuf = (void *)&fsCallDesc, // overload field with proc pointer
+	.vcbCtlBuf = CALLIN68K_C_ARG44_GLOBDEF(fsCall), // overload field with proc pointer
 };
 static struct GetVolParmsInfoBuffer vparms = {
 	.vMVersion = 1, // goes up to version 4
@@ -191,9 +180,6 @@ DriverDescription TheDriverDescription = {
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
-
-const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dReadEnableMask;
-const char drvrNameVers[] = "\x09.Virtio9P\0\x01\x00";
 
 RegEntryID regentryid;
 
@@ -266,7 +252,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
 	regentryid = info->deviceEntry;
-	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
+	sprintf(logprefix, ".Virtio9P(%d) ", info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 // 		logenable = 1;
 // 	}
@@ -357,9 +343,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 			"4eb9 %l "   // jsr     installExtFS
 			"4eb9 %l "   // jsr     ensureFutureMount
 			"4cdf 0307", // movem.l (sp)+,d0-d2/a0-a1
-			             // fallthru to uninstall code (which will tst.w d0)
-			STATICDESCRIPTOR(installExtFS, kCStackBased),
-			STATICDESCRIPTOR(ensureFutureMount, kCStackBased)
+			             // fallthru to uninstall code
+			CALLIN68K_C_ARG0_FUNCDEF(installExtFS),
+			CALLIN68K_C_ARG0_FUNCDEF(ensureFutureMount)
 		);
 	}
 
@@ -488,7 +474,7 @@ static void ensureFutureMount(void) {
 		"6106"          //      bsr.s   uninstall
 		"4ef9 %o",      // old: jmp     originalGestalt
 		                // uninstall: (fallthrough code)
-		STATICDESCRIPTOR(lateBootHook, kCStackBased)
+		CALLIN68K_C_ARG0_FUNCDEF(lateBootHook)
 	);
 }
 
@@ -1914,7 +1900,7 @@ int32_t mactime(int64_t unixtime) {
 	return mactime;
 }
 
-static long fsCall(void *pb, long selector, void *stack) {
+static long fsCall(void *pb, long selector) {
 	static unsigned char hdr;
 	if (hdr++ == 0) {
 		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/(hfsTimer+1), relistTimer*100/(hfsTimer+1));

@@ -21,7 +21,7 @@ Reclaim stale data in the array (e.g. free list inside the heap block)
 
 #include "hashtab.h"
 
-#include "callupp.h"
+#include "callin68k.h"
 #include "printf.h"
 #include "panic.h"
 
@@ -40,6 +40,16 @@ struct entry {
 	int tag;
 };
 
+static size_t chooseTableSize(void);
+static size_t chooseBlobSize(void);
+static void notificationProc(NMRecPtr nmReqPtr);
+static unsigned long hash(int tag, const void *key, short klen);
+static size_t store(const void *data, size_t bytes);
+static struct entry *find(int tag, const void *key, short klen);
+static void *entrykey(struct entry *e);
+static void *entryval(struct entry *e);
+static void dump(void);
+
 // Linearly probed hash table
 // Grow exponentially to keep occupancy between 25% and 50%
 static struct entry *table;
@@ -50,15 +60,10 @@ static size_t blobsize, blobused;
 
 static int notificationPending;
 
-static size_t chooseTableSize(void);
-static size_t chooseBlobSize(void);
-static void notificationProc(NMRecPtr nmReqPtr);
-static unsigned long hash(int tag, const void *key, short klen);
-static size_t store(const void *data, size_t bytes);
-static struct entry *find(int tag, const void *key, short klen);
-static void *entrykey(struct entry *e);
-static void *entryval(struct entry *e);
-static void dump(void);
+static struct NMRec notification = {
+	.qType=8,
+	.nmResp=CALLIN68K_PAS_ARG4_RET0_GLOBDEF(notificationProc),
+};
 
 // Calls the Memory Manager -- only when moving memory is safe
 // e.g. "system task time" or a synchronous Open call
@@ -125,11 +130,7 @@ void HTallocatelater(void) {
 
 	printf("Hash table needs memory: posting notification task\n");
 
-	static struct NMRec rec = {.qType=8};
-	rec.nmResp = STATICDESCRIPTOR(
-		notificationProc,
-		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode));
-	NMInstall(&rec);
+	NMInstall(&notification);
 	notificationPending = 1;
 }
 

@@ -8,6 +8,7 @@
 #include <OSUtils.h>
 #include <Slots.h>
 
+#include "callin68k.h"
 #include "device.h"
 #include "panic.h"
 #include "structs-mmio.h"
@@ -23,14 +24,12 @@ struct goldfishPIC {
 	uint32_t enable; // write bitmask
 }; // platform native byte order
 
-static void interruptTopHalf(void);
+static long interruptTopHalf(void);
 static void configIntBottomHalf(void);
 
 // Globals declared in transport.h, define here
 void *VConfig;
 uint16_t VMaxQueues;
-
-extern struct AuxDCE dce;
 
 static volatile struct virtioMMIO *device;
 static volatile struct goldfishPIC *pic;
@@ -38,39 +37,22 @@ static uint32_t picmask;
 
 static bool qnotifying, cnotifying;
 
-static uint16_t interwrap[] = {
-	0x48e7, 0x6040,         // movem.l d1-d2/a1,-(sp)
-	0x4eb9, 0x0000, 0x0000, // jsr     c_handler
-	0x4cdf, 0x0206,         // movem.l (sp)+,d1-d2/a1
-	0x4280,                 // clr.l   d0   "did not handle the interrupt"
-	0x4e75                  // rts
-};
-
-static struct SlotIntQElement siq = {
+// Coexists in a queue with all the Virtio devices on this same board
+static struct SlotIntQElement slotInterrupt = {
+	.sqLink = (void *)'ELMO',
 	.sqType = sIQType,
-	.sqPrio = 100, // high priority, run first
-	.sqAddr = (void *)interwrap, // no address relocation yet
+	.sqPrio = 0, // arbitrary priority
+	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptTopHalf),
 };
 
-static uint16_t interstop[] = {
-	0x70ff,                 // moveq   #$ff,d0    "did handle the interrupt"
-	0x4e75                  // rts
-};
-
-static struct SlotIntQElement siq2 = {
-	.sqType = sIQType,
-	.sqPrio = 50, // low priority, run last
-	.sqAddr = (void *)interstop, // no address relocation yet
-};
-
-static struct DeferredTask dtq = {
+static struct DeferredTask queueDeferredTask = {
 	.qType = dtQType,
-	.dtAddr = (void *)QNotified,
+	.dtAddr = CALLIN68K_C_ARG0_GLOBDEF(QNotified),
 };
 
-static struct DeferredTask dtc = {
+static struct DeferredTask configDeferredTask = {
 	.qType = dtQType,
-	.dtAddr = (void *)configIntBottomHalf,
+	.dtAddr = CALLIN68K_C_ARG0_GLOBDEF(configIntBottomHalf),
 };
 
 // returns true for OK
@@ -117,11 +99,7 @@ bool VInit(RegEntryID *id) {
 	}
 	VSetFeature(32, true);
 
-	*(void **)(interwrap + 3) = &interruptTopHalf;
-	BlockMove(interwrap, interwrap, sizeof interwrap); // clear code cache
-
-	if (SIntInstall(&siq, 12)) return false;
-	if (SIntInstall(&siq2, 12)) return false;
+	if (SIntInstall(&slotInterrupt, 12)) return false;
 
 	pic->enable = 0xffffffff;
 	SynchronizeIO();
@@ -198,23 +176,33 @@ void VNotify(uint16_t queue) {
 	SynchronizeIO();
 }
 
-static void interruptTopHalf(void) {
-	if (!(pic->pending & picmask)) return;
-
+static long interruptTopHalf(void) {
+	// Ignore the Goldfish for now, just check the Virtio registers for an
+	// interrupt, and lower it if needed
 	uint32_t flags = device->interruptStatus;
-
-	device->interruptACK = flags; // lower the interrupt
+	SynchronizeIO();
+	if (flags) device->interruptACK = flags;
 	SynchronizeIO();
 
 	if ((flags & 1) && !qnotifying) {
 		QDisarm();
 		qnotifying = true;
-		DTInstall(&dtq);
+		DTInstall(&queueDeferredTask);
 	}
 
 	if ((flags & 2) && !cnotifying) {
 		cnotifying = true;
-		DTInstall(&dtc);
+		DTInstall(&configDeferredTask);
+	}
+
+	// We have lowered the interrupt for this Virtio device. Now lie to
+	// the Slot Manager that we definitively handled the interrupt.
+	// If another Virtio device on this Goldfish has a pending interrupt,
+	// then pretend we handled nothing, to continue down the handler chain.
+	if (pic->pending) {
+		return 0; // "did not handle"
+	} else {
+		return 1; // "did handle"
 	}
 }
 

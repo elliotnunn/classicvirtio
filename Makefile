@@ -33,12 +33,17 @@ CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
 
 ############################# CLASSIC DRVR #############################
 
+# -O1 etc cause crashes with -msep-data (narrowed down to -fcombine-stack-adjustments)
+SAFEOPTIM = -fauto-inc-dec -fbranch-count-reg -fcompare-elim -fcprop-registers -fdce -fdefer-pop -fdse -fforward-propagate -fguess-branch-probability -fif-conversion -fif-conversion2 -finline-functions-called-once -fipa-modref -fipa-profile -fipa-pure-const -fipa-reference -fipa-reference-addressable -fmerge-constants -fmove-loop-invariants -fmove-loop-stores -freorder-blocks -fshrink-wrap -fshrink-wrap-separate -fsplit-wide-types -fssa-backprop -fssa-phiopt -ftree-bit-ccp -ftree-ccp -ftree-ch -ftree-coalesce-vars -ftree-copy-prop -ftree-dce -ftree-dominator-opts -ftree-dse -ftree-forwprop -ftree-fre -ftree-phiprop -ftree-pta -ftree-scev-cprop -ftree-sink -ftree-slsr -ftree-sra -ftree-ter -funit-at-a-time
+INTERFACEONLY = $(shell m68k-apple-macos-gcc -print-file-name=libInterface.a)
+ALLLIBS = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
+
 # The classic drivers are linked together into one "card declaration ROM":
 #     qemu-system-m68k -device nubus-virtio-mmio,romfile=build/classic/declrom
 # This ROM incorporates the actual DRVRs and a few "slotexec" functions.
 SLOTEXECS = $(patsubst slotexec-%.c,%,$(wildcard slotexec-*.c))
 build/classic/declrom: declrom.s \
-		$(patsubst %,build/classic/drvr-%,$(DEVICES_CLASSIC)) \
+		$(patsubst %,build/classic/drvr-%.elf,$(DEVICES_CLASSIC)) \
 		$(patsubst %,build/classic/slotexec-%,$(SLOTEXECS))
 	m68k-apple-macos-as -o build/classic/declrom.o declrom.s
 	m68k-apple-macos-ld -o build/classic/declrom.elf build/classic/declrom.o
@@ -48,11 +53,11 @@ build/classic/declrom: declrom.s \
 # The "slotexec" helper functions are also needed in the declaration ROM,
 # but are built using different compiler options (PC-relative addressing FYI)
 build/classic/slotexec-%.o: slotexec-%.c
-	m68k-apple-macos-gcc $(CDEFS) -c -Os -mpcrel -o $@ $^
+	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -Os -mpcrel -o $@ $^
 
 # Wrap an "sExecBlock" header around the slotexec code using a linker script
 build/classic/slotexec-%.elf: slotexec.lds build/classic/slotexec-%.o
-	m68k-apple-macos-ld -o $@ --script $^ $(DRVRSTATICLIBS)
+	m68k-apple-macos-ld --no-warn-rwx-segments -o $@ --script $^ $(ALLLIBS)
 
 # Extract the "sExecBlock" from an ELF, ready for inclusion in the decl ROM
 build/classic/slotexec-%: build/classic/slotexec-%.elf
@@ -60,26 +65,16 @@ build/classic/slotexec-%: build/classic/slotexec-%.elf
 
 # Compile the DRVR code files (slotexec code has different compiler options)
 build/classic/%.o: %.c
-	m68k-apple-macos-gcc $(CDEFS) -c -Os -ffunction-sections -fdata-sections -o $@ $<
+	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -msep-data -ffunction-sections -fdata-sections $(SAFEOPTIM) -o $@ $<
 
-# Link each DRVR, creating the Device Manager header using a linker script.
-# "Classic 68k runtime" is statically linked, so pull in a libc and some MacOS glue code.
-DRVRSTATICLIBS = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
-build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC))
-	m68k-apple-macos-ld --emit-relocs --gc-sections -o $@ --script $^ $(DRVRSTATICLIBS)
+# Link each driver into an ELF, which will be DRVRised by slotexec-drvrload.c
+# This code uses A5-refs (-msep-data) so we cannot use the Retro68 libc, but Interfaces are fine
+build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/jumpglue.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC))
+	m68k-apple-macos-ld.real -Ttext-segment 0xcd790000 -e drvrROMEntry --gc-sections -o $@ --script $^ $(INTERFACEONLY)
 
-# The DRVR has some assembly code to fix up interior pointers and call through to C.
-build/classic/drvr.o: drvr.s
+# The DRVR has some assembly code to call through to C
+build/classic/%.o: %.s
 	m68k-apple-macos-as -o $@ $^
-
-# Besides extracting the pure DRVR from an ELF file, this is an important postlink step:
-# Append a list of "relocations" (i.e. pointer offsets) to be "fixed up" at runtime.
-build/classic/drvr-%: build/classic/drvr-%.elf
-	m68k-apple-macos-objcopy -O binary -j .drvr $^ $@
-	(m68k-apple-macos-objdump -r $^ | fgrep R_68K_32; echo 00000000) \
-		| cut -d ' ' -f1 \
-		| python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' \
-		>>$@
 
 ############################# POWERPC NDRV #############################
 
