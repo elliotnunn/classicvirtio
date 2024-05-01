@@ -4,19 +4,16 @@
 #include <Devices.h>
 #include <DriverServices.h>
 #include <Events.h>
-#include <LowMem.h>
 #include <MixedMode.h>
-#include <Quickdraw.h>
 #include <Types.h>
-#include <Traps.h>
 
 #include "allocator.h"
 #include "callupp.h"
 #include "printf.h"
 #include "panic.h"
 #include "transport.h"
+#include "scrollwheel.h"
 #include "virtqueue.h"
-#include "patch68k.h"
 
 #include "device.h"
 
@@ -34,18 +31,10 @@ short funnel(long commandCode, void *pb);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
-static void myGNEFilter(EventRecord *event, Boolean *result);
-static void lateBootHook(void);
-static pascal ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, ControlActionUPP actionProc);
 static void reQueue(int bufnum);
 
 static struct event *lpage;
 static uint32_t ppage;
-static bool patchReady;
-static void *oldGNEFilter, *oldTrackControl;
-static ControlRecord **curScroller;
-static long pendingScroll;
-// uint32_t eventPostedTime;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -149,63 +138,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	QNotify(0);
 
-	printf("Hooking Process Manager startup: ");
-	Patch68k(
-		_Gestalt,
-		"0c80 6f732020" //      cmp.l   #'os  ',d0
-		"661c"          //      bne.s   old
-		"0801 0009"     //      btst    #9,d1
-		"6716"          //      beq.s   old
-		"0801 000a"     //      btst    #10,d1
-		"6610"          //      bne.s   old
-		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
-		"4eb9 %l"       //      jsr     lateBootHook
-		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
-		"6106"          //      bsr.s   uninstall
-		"4ef9 %o",      // old: jmp     originalGestalt
-		                // uninstall: (fallthrough code)
-		STATICDESCRIPTOR(lateBootHook, kCStackBased)
-	);
+	ScrollInit();
 
 	return noErr;
-}
-
-static void lateBootHook(void) {
-	printf("Patching TrackControl\n");
-
-	oldTrackControl = (ControlActionUPP)GetToolTrapAddress(_TrackControl);
-
-	SetToolTrapAddress(
-		STATICDESCRIPTOR(
-			myTrackControl,
-			kPascalStackBased
-				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
-				| RESULT_SIZE(kTwoByteCode)),
-		_TrackControl);
-
-	printf("Patching GNEFilter\n");
-
-#if GENERATINGCFM
-	oldGNEFilter = LMGetGNEFilter(); // PowerPC version calls through the chain
-
-	LMSetGNEFilter((void *)STATICDESCRIPTOR(myGNEFilter, uppGetNextEventFilterProcInfo));
-#else
-	Patch68k(
-		0x29a, // jGNEFilter:
-		"486f 0004" // pea    4(sp)         ; push boolean pointer
-		"2f09"      // move.l a1,-(sp)      ; push event record pointer
-		"4eb9 %l"   // jsr    myGNEFilter   ; call into C
-		"225f"      // move.l (sp)+,a1      ; restore event record pointer
-		"588f"      // addq   #4,sp         ; pop boolean pointer
-		"302f 0004" // move.w 4(sp),d0      ; same value expected in these places
-		"4ef9 %o",  // jmp    original
-		myGNEFilter
-	);
-#endif
-
-	patchReady = true;
 }
 
 static void handleEvent(struct event e) {
@@ -251,15 +186,8 @@ static void handleEvent(struct event e) {
 	} else if (e.type == 1 && e.code == BTN_RIGHT) {
 		knowmask |= 2;
 		if (e.value) newbtn |= 2;
-	} else if (e.type == EV_REL && e.code == REL_WHEEL && patchReady) {
-		pendingScroll += e.value;
-
-		uint32_t t = LMGetTicks();
-// 		if (eventPostedTime == 0 || t - eventPostedTime > 30) {
-			PostEvent(mouseDown, 'scrl');
-			PostEvent(mouseUp, 'scrl');
-// 			eventPostedTime = t;
-// 		}
+	} else if (e.type == EV_REL && e.code == REL_WHEEL) {
+		Scroll(e.value);
 	} else if (e.type == EV_SYN) {
 		if (knowpos) {
 			// Scale to screen size (in lowmem globals)
@@ -300,109 +228,6 @@ static void handleEvent(struct event e) {
 		knowmask = 0;
 		newbtn = 0;
 	}
-}
-
-// Second stage of scroll event
-// (Now, at non-interrupt time, we can safely inspect Toolbox structures.)
-// Synthesise a click event in an appropriate scrollbar.
-static void myGNEFilter(EventRecord *event, Boolean *result) {
-	if (event->what == mouseDown && event->message == 'scrl') {
-		struct WindowRecord *wind = (void *)FrontWindow();
-		unsigned char *name = *wind->titleHandle;
-
-		// Find the scroller to move
-		// Currently it's the first vertical in the front window
-		// In future select more smartly
-		for (curScroller = (void *)wind->controlList; curScroller; curScroller = (**curScroller).nextControl) {
-			struct ControlRecord *ptr = *curScroller;
-
-			void *defproc = *ptr->contrlDefProc;
-			short cdefnum = *(int16_t *)(defproc + 8);
-
-			int16_t w = ptr->contrlRect.right - ptr->contrlRect.left;
-			int16_t h = ptr->contrlRect.bottom - ptr->contrlRect.top;
-
-			if (h > w && ptr->contrlHilite != 255 && cdefnum == 24) break;
-		}
-
-		if (curScroller) {
-			// Yes, it's the right event
-			// Click in the upper-left of the scroller
-			Point pt = {(*curScroller)->contrlRect.top, (*curScroller)->contrlRect.left};
-
-			// Convert to window coordinates
-			GrafPtr oldport;
-			GetPort(&oldport);
-			SetPort((*curScroller)->contrlOwner);
-			LocalToGlobal(&pt);
-			SetPort(oldport);
-
-			event->what = mouseDown;
-			event->message = 0;
-			event->where = pt;
-			*result = true;
-		} else {
-			// Not the right event
-			event->what = nullEvent;
-			event->message = 0;
-			*result = false;
-		}
-	}
-
-	// On PowerPC, call the next filter in the chain
-	// On 68k, just return, and the wrapper code will jump to it
-#if GENERATINGCFM
-	CallGetNextEventFilterProc(oldGNEFilter, event, result);
-#endif
-}
-
-// Third stage of scroll event
-// The app associated the (fake) click with our scrollbar
-// Tell the app that the scrollbar was dragged,
-// but tell the scrollbar to move to a specific point.
-static pascal ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, ControlActionUPP actionProc) {
-	if (theControl != curScroller) {
-		return CALLPASCAL3(ControlPartCode, oldTrackControl,
-			ControlRef, theControl,
-			Point, startPoint,
-			ControlActionUPP, actionProc);
-	}
-
-	int32_t min, max, val;
-// COMMENT OUT BECAUSE IT PREVENTS US LOADING AT EARLY BOOT!
-// #if GENERATINGCFM
-// 	if (GetControl32BitValue != NULL) {
-// 		min = GetControl32BitMinimum(curScroller);
-// 		max = GetControl32BitMaximum(curScroller);
-// 		val = GetControl32BitValue(curScroller);
-// 	} else
-// #endif
-	{
-		min = GetControlMinimum(curScroller);
-		max = GetControlMaximum(curScroller);
-		val = GetControlValue(curScroller);
-	}
-
-
-	val -= pendingScroll * 3;
-	pendingScroll = 0;
-	if (val < min) val = min;
-	if (val > max) val = max;
-	SetControlValue(curScroller, val); // ALSO DO 32-BIT!
-
-	if ((int)actionProc & 1) {
-		actionProc = (*curScroller)->contrlAction;
-	}
-
-	if (actionProc) {
-		CALLPASCAL2(void, actionProc,
-			ControlRef, curScroller,
-			short, 129);
-	}
-
-	curScroller = NULL;
-
-	return 129; // click was in the thumb
 }
 
 static void reQueue(int bufnum) {
