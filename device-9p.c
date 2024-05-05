@@ -1186,10 +1186,8 @@ static OSErr fsWrite(struct IOParam *pb) {
 		return posErr;
 	}
 
-	// Mac OS 9 (HFS and HFS+) writes uninitialized data to the file in this case!
 	if (start > fcb->fcbEOF) {
-		pb->ioPosOffset = fcb->fcbCrPs = fcb->fcbEOF;
-		return eofErr;
+		printf("Write at offset %d of %d byte file: OS 9 would write junk data!\n", start, fcb->fcbEOF);
 	}
 
 	// Request the host
