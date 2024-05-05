@@ -424,7 +424,7 @@ static uint32_t readin(uint32_t rezfid, uint32_t scratchfid, uint64_t offset) {
 		int32_t rezoffset = rbufseek;
 
 		int32_t bodylen;
-		int32_t fixup = wbufseek;
+		int64_t fixup = wbufseek;
 		for (int i=0; i<4; i++) Write(0);
 		bodylen = RezBody();
 		err = Overwrite(&bodylen, fixup, 4);

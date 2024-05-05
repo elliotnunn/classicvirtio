@@ -4,21 +4,23 @@
 #include "9buf.h"
 
 char *rbuf;
-long rbufsize, rbufat, rbufcnt, rbufseek;
+uint32_t rbufsize, rbufcnt;
+uint64_t rbufat, rbufseek;
 uint32_t rfid;
 
 char *wbuf;
-long wbufsize, wbufat, wbufcnt, wbufseek;
+uint32_t wbufsize, wbufcnt;
+uint64_t wbufat, wbufseek;
 uint32_t wfid;
 
-void SetRead(uint32_t fid, void *buffer, long buflen) {
+void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 	rbuf = buffer;
 	rbufsize = buflen;
 	rbufat = rbufcnt = rbufseek = 0;
 	rfid = fid;
 }
 
-void SetWrite(uint32_t fid, void *buffer, long buflen) {
+void SetWrite(uint32_t fid, void *buffer, uint32_t buflen) {
 	wbuf = buffer;
 	wbufsize = buflen;
 	wbufat = wbufcnt = wbufseek = 0;
@@ -40,9 +42,9 @@ int WriteBuf(void *x, size_t n) {
 // Overwrite: special case for resource forks
 // Optimises so we usually don't seek backwards
 // *Must* have already written these bytes with Write(0)
-int Overwrite(void *buf, long at, long cnt) {
-	long ok = 0;
-	for (long i=0; i<cnt; i++) {
+int Overwrite(void *buf, uint64_t at, uint32_t cnt) {
+	uint32_t ok = 0;
+	for (uint32_t i=0; i<cnt; i++) {
 		if (at+i >= wbufat && at+i < wbufat+wbufcnt) {
 			wbuf[at+i-wbufat] = ((char *)buf)[i];
 			ok++;
