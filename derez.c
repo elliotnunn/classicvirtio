@@ -8,6 +8,8 @@
 
 #include "derez.h"
 
+static char *lutget(char *dest, const char *lut, char letter);
+
 // Escape code lookup table for quoted strings
 // (needs tweaking to switch between single and double quoted strings)
 static const char lut[5*256] =
@@ -45,12 +47,21 @@ static const char lut[5*256] =
 	"\\0xF8"     "\\0xF9"     "\\0xFA"     "\\0xFB"     "\\0xFC"     "\\0xFD"     "\\0xFE"     "\\0xFF";
 
 
+static char *lutget(char *dest, const char *lut, char letter) {
+	lut += 5 * (255 & letter);
+	for (int i=0; i<5; i++) {
+		if ((*dest = *lut++) == 0) break;
+		dest++;
+	}
+	return dest;
+}
+
 void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	char header[512] = "data '";
 	char *p = header + 6;
 
 	for (int i=0; i<4; i++) {
-		p = stpcpy(p, lut + 5*(unsigned char)type[i]);
+		p = lutget(p, lut, type[i]);
 		if (p[-1] == '\'') p = stpcpy(p-1, "\\'"); // escape single quote
 	}
 
@@ -59,7 +70,7 @@ void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	if (name) {
 		p = stpcpy(p, ", \"");
 		for (uint8_t i=0; i<name[0]; i++) {
-			p = stpcpy(p, lut + 5*(unsigned char)name[i+1]);
+			p = lutget(p, lut, name[i+1]);
 			if (p[-1] == '"') p = stpcpy(p-1, "\\\""); // escape double quote
 		}
 		*p++ = '"';
