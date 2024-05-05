@@ -174,6 +174,7 @@ static int write3(void *opaque, const void *buf, uint64_t offset, uint32_t count
 		}
 
 		c->dirty = true;
+		if (c->size < offset + count) c->size = offset + count;
 
 		return Write9(FIDBIG, buf, c->offset+offset, count, actual_count);
 	}
