@@ -148,11 +148,11 @@ static struct VCB vcb = {
 	.vcbSigWord = kHFSSigWord,
 	.vcbNmFls = 1234,
 	.vcbNmRtDirs = 6, // "number of directories in root" -- why?
-	.vcbNmAlBlks = 0xf000,
-	.vcbAlBlkSiz = 512,
-	.vcbClpSiz = 512,
+	.vcbNmAlBlks = 0x7fff,
+	.vcbAlBlkSiz = 32*1024,
+	.vcbClpSiz = 32*1024,
 	.vcbNxtCNID = 16, // the first "user" cnid... we will never use this field
-	.vcbFreeBks = 0xe000,
+	.vcbFreeBks = 0x7fff,
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
@@ -315,6 +315,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 	printf("Volume name: %s\n", name);
 	mr27name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
 	setDB(2, 1, name);
+
+	// Need unique stable creation date, used pervasively as an ID, from inode#
+	vcb.vcbCrDate = 0x80000000 ^
+		(root.path & 0x3fffffff) ^
+		((root.path >> 30) & 0x3fffffff) ^
+		((root.path >> 60) & 0xf);
 
 	// Choose a multifork format by probing the fs contents
 	MFChoose(formathint);
@@ -578,8 +584,29 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	return noErr;
 }
 
-// TODO: fake used/free alloc blocks (there are limits depending on H bit)
-static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
+static OSErr fsGetVolInfo(struct XVolumeParam *pb) {
+	// Sizes
+	struct Statfs9 statfs = {};
+	Statfs9(ROOTFID, &statfs);
+	uint64_t total = statfs.blocks * statfs.bsize;
+	uint64_t free = statfs.bavail * statfs.bsize;
+
+	if ((pb->ioTrap&0x00ff) == 0x60) { // XGetVolInfo
+		pb->ioVTotalBytes = total;
+		pb->ioVFreeBytes = free;
+	}
+
+	// Clip sizes to less than 2 GB, reported as 32k blocks
+	if (total > 0x7fffffff) total = 0x7fffffff;
+	if (free > 0x7fffffff) free = 0x7fffffff;
+	vcb.vcbNmAlBlks = pb->ioVNmAlBlks = total >> 15;
+	vcb.vcbFreeBks = pb->ioVFrBlk = total >> 15;
+
+	// Get root dir modification date
+	struct Stat9 stat = {};
+	Getattr9(ROOTFID, STAT_MTIME, &stat);
+	vcb.vcbLsMod = pb->ioVLsMod = mactime(stat.mtime_sec);
+
 	// Allow working directories to pretend to be disks
 	int32_t cnid = 2;
 	if (pb->ioVRefNum <= WDHI) {
@@ -603,6 +630,8 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 	while (Readdir9(scratch, NULL, &type, childname) == 0) {
 		if (visName(childname) && type != 4 /*not folder*/) pb->ioVNmFls++;
 	}
+
+	vcb.vcbNmFls = pb->ioVNmFls;
 
 	return noErr;
 }
@@ -1994,7 +2023,7 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMSetVolInfo: return noErr;
 	case kFSMLockRng: return extFSErr;
 	case kFSMUnlockRng: return extFSErr;
-	case kFSMXGetVolInfo: return extFSErr;
+	case kFSMXGetVolInfo: return fsGetVolInfo(pb);
 	case kFSMCreateFileIDRef: return extFSErr;
 	case kFSMDeleteFileIDRef: return extFSErr;
 	case kFSMResolveFileIDRef: return extFSErr;

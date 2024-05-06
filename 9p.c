@@ -106,6 +106,17 @@ int Attach9(uint32_t fid, uint32_t afid, const char *uname, const char *aname, u
 		retqid);
 }
 
+int Statfs9(uint32_t fid, struct Statfs9 *ret) {
+	enum {Tstatfs = 8}; // size[4] Tstatfs tag[2] fid[4]
+	enum {Rstatfs = 9}; // size[4] Rstatfs tag[2] type[4] bsize[4] blocks[8] bfree[8]
+	                    // bavail[8] files[8] ffree[8] fsid[8] namelen[4]
+
+	return transact(Tstatfs, "d", "ddqqqqqqd",
+		fid,
+		&ret->type, &ret->bsize, &ret->blocks, &ret->bfree,
+		&ret->bavail, &ret->files, &ret->ffree, &ret->fsid, &ret->namelen);
+}
+
 // Respects the protocol's 16-component maximum
 // call with nwname 0 to duplicate a fid
 int Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *name, uint16_t *retnwqid, struct Qid9 *retqid) {
