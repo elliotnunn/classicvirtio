@@ -57,7 +57,7 @@ static char *lutget(char *dest, const char *lut, char letter) {
 }
 
 void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
-	char header[512] = "data '";
+	char header[2048] = "data '";
 	char *p = header + 6;
 
 	for (int i=0; i<4; i++) {
