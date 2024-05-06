@@ -129,7 +129,6 @@ static int close3(void *opaque) {
 
 			struct Stat9 stat;
 			if (Getattr9(FID1, STAT_MTIME, &stat)) panic("stat failed should be ok");
-			printf("stat sec %x\n", (int)stat.mtime_sec);
 			c->sec = stat.mtime_sec;
 			c->nsec = stat.mtime_nsec;
 
@@ -537,17 +536,10 @@ static void writeout(uint32_t scratchfid, uint64_t offset, uint32_t rezfid) {
 	char map[64*1024];
 	Read9(scratchfid, map, offset + head[1], head[3], NULL);
 
-	printf("map base %ld len %ld\n", head[1], head[3]);
-	for (long i=0; i<head[3]; i++) printf("%02x ", 255&map[i]);
-	printf("\n");
-
 	char *tl = map + READ16BE(map+24);
 	char *nl = map + READ16BE(map+26);
 
-	printf("namelist starts with %.*s\n", nl[0], nl+1);
-
 	int nt = (uint16_t)(READ16BE(tl) + 1);
-	printf("nt=%d\n", nt);
 
 	SetRead(scratchfid, rbuf, sizeof rbuf);
 	SetWrite(rezfid, wbuf, sizeof wbuf);
@@ -561,14 +553,12 @@ static void writeout(uint32_t scratchfid, uint64_t offset, uint32_t rezfid) {
 
 			int16_t id = READ16BE(r);
 			uint16_t nameoff = READ16BE(r+2);
-			printf("nameoff %d\n", nameoff);
 			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
 			uint8_t attr = *(r+4);
 			uint32_t contoff = READ24BE(r+5);
 
 			DerezHeader(attr, t, id, name);
 
-			printf("relevant are %ld %ld %ld\n", (long)offset, (long)head[0], (long)contoff);
 			rbufseek = offset + head[0] + contoff;
 			uint32_t len = 0;
 			for (int i=0; i<4; i++) {
