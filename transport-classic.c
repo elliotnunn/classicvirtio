@@ -25,6 +25,7 @@ struct goldfishPIC {
 }; // platform native byte order
 
 static long interruptTopHalf(void);
+static long interruptCompleteStub(void);
 static void configIntBottomHalf(void);
 
 // Globals declared in transport.h, define here
@@ -40,8 +41,15 @@ static bool qnotifying, cnotifying;
 // Coexists in a queue with all the Virtio devices on this same board
 static struct SlotIntQElement slotInterrupt = {
 	.sqType = sIQType,
-	.sqPrio = 0, // arbitrary priority
+	.sqPrio = 20, // do before the "backstop"
 	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptTopHalf),
+};
+
+// An extra interrupt handler that returns "1" to prevent a dsBadSlotInt
+static struct SlotIntQElement slotInterruptBackstop = {
+	.sqType = sIQType,
+	.sqPrio = 10, // do last
+	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptCompleteStub),
 };
 
 static struct DeferredTask queueDeferredTask = {
@@ -99,6 +107,7 @@ bool VInit(RegEntryID *id) {
 	VSetFeature(32, true);
 
 	if (SIntInstall(&slotInterrupt, slotnum)) return false;
+	if (SIntInstall(&slotInterruptBackstop, slotnum)) return false;
 
 	pic->enable = 0xffffffff;
 	SynchronizeIO();
@@ -194,15 +203,16 @@ static long interruptTopHalf(void) {
 		DTInstall(&configDeferredTask);
 	}
 
-	// We have lowered the interrupt for this Virtio device. Now lie to
-	// the Slot Manager that we definitively handled the interrupt.
-	// If another Virtio device on this Goldfish has a pending interrupt,
-	// then pretend we handled nothing, to continue down the handler chain.
-	if (pic->pending) {
-		return 0; // "did not handle"
-	} else {
-		return 1; // "did handle"
-	}
+	// We have lowered the interrupt for this Virtio device.
+	// Pretend we handled nothing, to continue down the handler chain.
+	return 0; // "did not handle"
+}
+
+// Interrupt handler chain ends here
+// Defensive: previously we tried to test for pending interrupts and return 1
+// from interruptTopHalf, but we got occasional dsBadSlotInt crashes.
+static long interruptCompleteStub(void) {
+	return 1; // "did handle"
 }
 
 static void configIntBottomHalf(void) {
