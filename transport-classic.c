@@ -39,7 +39,6 @@ static bool qnotifying, cnotifying;
 
 // Coexists in a queue with all the Virtio devices on this same board
 static struct SlotIntQElement slotInterrupt = {
-	.sqLink = (void *)'ELMO',
 	.sqType = sIQType,
 	.sqPrio = 0, // arbitrary priority
 	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptTopHalf),
