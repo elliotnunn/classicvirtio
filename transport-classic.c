@@ -98,7 +98,7 @@ bool VInit(RegEntryID *id) {
 	}
 	VSetFeature(32, true);
 
-	if (SIntInstall(&slotInterrupt, 12)) return false;
+	if (SIntInstall(&slotInterrupt, slotnum)) return false;
 
 	pic->enable = 0xffffffff;
 	SynchronizeIO();
