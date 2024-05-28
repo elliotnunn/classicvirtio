@@ -69,7 +69,7 @@ build/classic/%.o: %.c
 
 # Link each driver into an ELF, which will be DRVRised by slotexec-drvrload.c
 # This code uses A5-refs (-msep-data) so we cannot use the Retro68 libc, but Interfaces are fine
-build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/jumpglue.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC))
+build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/jumpglue.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC)) $(wildcard  a5libs/*.a)
 	m68k-apple-macos-ld.real -Ttext-segment 0xcd790000 -e drvrROMEntry --gc-sections -o $@ --script $^ $(INTERFACEONLY)
 
 # The DRVR has some assembly code to call through to C

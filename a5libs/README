@@ -1,0 +1,13 @@
+Abominable!
+
+Our DRVR runtime requires all code to be compiled with -msep-data,
+including libraries. These were rebuilt inside my Retro68-build
+directory by replacing "xgcc" with a wrapper script, and running "make
+clean && make" in the libgcc and newlib directories.
+
+#!/bin/sh
+echo "running my wrapper" >&2
+exec $0-real "$@" -msep-data
+
+Distributing libgcc under the GNU Runtime Library Exception, and newlib
+is permissively licensed.
