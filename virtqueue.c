@@ -69,7 +69,7 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 
 bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag) {
 	bool ret;
-	QSendAtomicPart(q, n_out, n_in, addrs, sizes, tag, &ret);
+	ATOMIC7(QSendAtomicPart, q, n_out, n_in, addrs, sizes, tag, &ret);
 	return ret;
 }
 
