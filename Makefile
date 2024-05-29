@@ -31,10 +31,11 @@ SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 # Settle a dispute between MacTypes.h and stdbool.h
 CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
 
+# Customise sqlite for embedded operation
+CDEFS := $(CDEFS) -DSQLITE_THREADSAFE=0 -DSQLITE_OS_OTHER=1 -DSQLITE_ENABLE_MEMSYS5=1
+
 ############################# CLASSIC DRVR #############################
 
-# -O1 etc cause crashes with -msep-data (narrowed down to -fcombine-stack-adjustments)
-SAFEOPTIM = -fauto-inc-dec -fbranch-count-reg -fcompare-elim -fcprop-registers -fdce -fdefer-pop -fdse -fforward-propagate -fguess-branch-probability -fif-conversion -fif-conversion2 -finline-functions-called-once -fipa-modref -fipa-profile -fipa-pure-const -fipa-reference -fipa-reference-addressable -fmerge-constants -fmove-loop-invariants -fmove-loop-stores -freorder-blocks -fshrink-wrap -fshrink-wrap-separate -fsplit-wide-types -fssa-backprop -fssa-phiopt -ftree-bit-ccp -ftree-ccp -ftree-ch -ftree-coalesce-vars -ftree-copy-prop -ftree-dce -ftree-dominator-opts -ftree-dse -ftree-forwprop -ftree-fre -ftree-phiprop -ftree-pta -ftree-scev-cprop -ftree-sink -ftree-slsr -ftree-sra -ftree-ter -funit-at-a-time
 INTERFACEONLY = $(shell m68k-apple-macos-gcc -print-file-name=libInterface.a)
 ALLLIBS = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
 
@@ -65,7 +66,7 @@ build/classic/slotexec-%: build/classic/slotexec-%.elf
 
 # Compile the DRVR code files (slotexec code has different compiler options)
 build/classic/%.o: %.c
-	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -msep-data -ffunction-sections -fdata-sections $(SAFEOPTIM) -o $@ $<
+	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -Os -msep-data -ffunction-sections -fdata-sections -o $@ $<
 
 # Link each driver into an ELF, which will be DRVRised by slotexec-drvrload.c
 # This code uses A5-refs (-msep-data) so we cannot use the Retro68 libc, but Interfaces are fine
