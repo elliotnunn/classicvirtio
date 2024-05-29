@@ -392,6 +392,14 @@ int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint3
 		actual_count);
 }
 
+int Fsync9(uint32_t fid) {
+	enum {Tfsync = 50}; // size[4] Tfsync tag[2] fid[4]
+	enum {Rfsync = 51}; // size[4] Rfsync tag[2]
+
+	return transact(Tfsync, "d", "",
+		fid);
+}
+
 void QueueNotified9(void) {
 	flag = true;
 }
