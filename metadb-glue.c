@@ -201,7 +201,7 @@ static int demoClose(sqlite3_file *pFile){
 	DemoFile *p = (DemoFile *)pFile;
 	printf("**** %s %s\n", __func__, p->path);
 	Clunk9(p->fid);
-	usedfids &= ~(1 << p->fid);
+	usedfids &= ~(1UL << (p->fid - FIRSTFID));
 	printreturn(SQLITE_OK);
 }
 
@@ -376,8 +376,8 @@ static int demoOpen(
 
 	uint32_t fid = 0;
 	for (int i=0; i<32; i++) {
-		if ((usedfids & (1 << i)) == 0) {
-			usedfids |= (1 << i);
+		if ((usedfids & (1UL << i)) == 0) {
+			usedfids |= (1UL << i);
 			fid = FIRSTFID + i;
 			break;
 		}
