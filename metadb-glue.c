@@ -1,70 +1,48 @@
-// 3.1.4. Zero-malloc memory allocator
-//
-// When SQLite is compiled with the SQLITE_ENABLE_MEMSYS5 option, an
-// alternative memory allocator that does not use malloc() is included in
-// the build. The SQLite developers refer to this alternative memory
-// allocator as "memsys5". Even when it is included in the build, memsys5
-// is disabled by default. To enable memsys5, the application must invoke
-// the following SQLite interface at start-time:
-//
-// sqlite3_config(SQLITE_CONFIG_HEAP, pBuf, szBuf, mnReq); In the call
-// above, pBuf is a pointer to a large, contiguous chunk of memory space
-// that SQLite will use to satisfy all of its memory allocation needs. pBuf
-// might point to a static array or it might be memory obtained from some
-// other application-specific mechanism. szBuf is an integer that is the
-// number of bytes of memory space pointed to by pBuf. mnReq is another
-// integer that is the minimum size of an allocation. Any call to
-// sqlite3_malloc(N) where N is less than mnReq will be rounded up to
-// mnReq. mnReq must be a power of two. We shall see later that the mnReq
-// parameter is important in reducing the value of n and hence the minimum
-// memory size requirement in the Robson proof.
-//
-// The memsys5 allocator is designed for use on embedded systems, though
-// there is nothing to prevent its use on workstations. The szBuf is
-// typically between a few hundred kilobytes up to a few dozen megabytes,
-// depending on system requirements and memory budget.
-//
-// The algorithm used by memsys5 can be called "power-of-two, first-fit".
-// The sizes of all memory allocation requests are rounded up to a power of
-// two and the request is satisfied by the first free slot in pBuf that is
-// large enough. Adjacent freed allocations are coalesced using a buddy
-// system. When used appropriately, this algorithm provides mathematical
-// guarantees against fragmentation and breakdown, as described further
-// below.
+// The bread around the sqlite3.c sandwich
 
 #include "9p.h"
 #include "panic.h"
 #include "printf.h"
 #include "sqlite3.h"
 
-// These three functions are statically linked but will never be called
+#include "metadb-glue.h"
+
+sqlite3_vfs *sqlite3_demovfs(void);
+
+// Firstly, have a single db pointer that all code should use
+sqlite3 *metadb;
+
+// Secondly, provide a startup hook that sets global sqlite3 configuration
+// (called by sqlite3 itself)
+int sqlite3_os_init(void) {
+	int sqerr;
+
+	sqerr = sqlite3_vfs_register(sqlite3_demovfs(), 0);
+	if (sqerr != SQLITE_OK) panic("sqlite3_vfs_register");
+
+	return SQLITE_OK;
+}
+
+// Thirdly, stub out libc functions that sqlite links but does not use
+// (due to our use of MEMSYS5)
 void *malloc(size_t size) {
-	panic("tried malloc");
+	panic("sqlite should not call malloc");
 }
 
 void free(void *buf) {
-	panic("tried free");
+	panic("sqlite should not call free");
 }
 
 void *realloc(void *buf, size_t size) {
-	panic("tried realloc");
+	panic("sqlite should not call realloc");
 }
 
 void localtime(void) {
 	panic("tried localtime");
 }
 
-
-
-sqlite3_vfs *sqlite3_demovfs(void);
-
-int sqlite3_os_init(void) {
-	int reg = sqlite3_vfs_register(sqlite3_demovfs(), 0);
-	return SQLITE_OK;
-}
-
-
-
+// Fourthly, give sqlite3 a "VFS" that backs onto our 9P API,
+// derived from example code for a minimal VFS
 
 /*
 ** 2010 April 7
@@ -183,6 +161,14 @@ int sqlite3_os_init(void) {
 
 #include <string.h>
 
+enum {
+	BASEFID = 40000, // the directory where all db files are made
+	FIRSTFID = 50000, // first of 32 scratch fids
+	SCRATCHFID = 49999, // for playing around
+};
+
+static uint32_t usedfids; // our own private fid range
+
 /*
 ** Size of the write buffer used by journal files in bytes.
 */
@@ -202,58 +188,21 @@ int sqlite3_os_init(void) {
 typedef struct DemoFile DemoFile;
 struct DemoFile {
   sqlite3_file base;              /* Base class. Must be first. */
+  const char *path;
   uint32_t fid; // 9P file ID
 };
 
-/*
-** Write directly to the file passed as the first argument. Even if the
-** file has a write-buffer (DemoFile.aBuffer), ignore it.
-*/
-static int demoDirectWrite(
-  DemoFile *p,                    /* File handle */
-  const void *zBuf,               /* Buffer containing data to write */
-  int iAmt,                       /* Size of data to write in bytes */
-  sqlite_int64 iOfst              /* File offset to write to */
-){
-	panic("directwrite");
-//   off_t ofst;                     /* Return value from lseek() */
-//   size_t nWrite;                  /* Return value from write() */
-//
-//   ofst = lseek(p->fd, iOfst, SEEK_SET);
-//   if( ofst!=iOfst ){
-//     return SQLITE_IOERR_WRITE;
-//   }
-//
-//   nWrite = write(p->fd, zBuf, iAmt);
-//   if( nWrite!=iAmt ){
-//     return SQLITE_IOERR_WRITE;
-//   }
-//
-//   return SQLITE_OK;
-}
-
-/*
-** Flush the contents of the DemoFile.aBuffer buffer to disk. This is a
-** no-op if this particular file does not have a buffer (i.e. it is not
-** a journal file) or if the buffer is currently empty.
-*/
-static int demoFlushBuffer(DemoFile *p){
-	panic("flushbuffer");
-//   int rc = SQLITE_OK;
-//   if( p->nBuffer ){
-//     rc = demoDirectWrite(p, p->aBuffer, p->nBuffer, p->iBufferOfst);
-//     p->nBuffer = 0;
-//   }
-//   return rc;
-}
+#define printreturn(x) {printf("         = " #x "\n"); return (x);}
 
 /*
 ** Close a file.
 */
 static int demoClose(sqlite3_file *pFile){
 	DemoFile *p = (DemoFile *)pFile;
+	printf("**** %s %s\n", __func__, p->path);
 	Clunk9(p->fid);
-	return SQLITE_OK;
+	usedfids &= ~(1 << p->fid);
+	printreturn(SQLITE_OK);
 }
 
 /*
@@ -266,19 +215,20 @@ static int demoRead(
   sqlite_int64 iOfst
 ){
 	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
 
 	uint32_t gotbytes;
 	if (Read9(p->fid, zBuf, iOfst, iAmt, &gotbytes)) {
-		return SQLITE_IOERR; // Actual IO error, not just short
+		printreturn(SQLITE_IOERR); // Actual IO error, not just short
 	}
 
 	// Unread parts of the buffer must be zero-filled
 	memset(zBuf + gotbytes, 0, iAmt - gotbytes);
 
 	if (gotbytes == iAmt) {
-		return SQLITE_OK;
+		printreturn(SQLITE_OK);
 	} else {
-		return SQLITE_IOERR_SHORT_READ;
+		printreturn(SQLITE_IOERR_SHORT_READ);
 	}
 }
 
@@ -292,16 +242,17 @@ static int demoWrite(
   sqlite_int64 iOfst
 ){
 	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
 
 	uint32_t gotbytes;
 	if (Write9(p->fid, zBuf, iOfst, iAmt, &gotbytes)) {
-		return SQLITE_IOERR;
+		printreturn(SQLITE_IOERR);
 	}
 
 	if (gotbytes == iAmt) {
-		return SQLITE_OK;
+		printreturn(SQLITE_OK);
 	} else {
-		return SQLITE_IOERR;
+		printreturn(SQLITE_IOERR);
 	}
 }
 
@@ -323,11 +274,12 @@ static int demoTruncate(sqlite3_file *pFile, sqlite_int64 size){
 static int demoSync(sqlite3_file *pFile, int flags){
 // ??? the Tfsync call doesn't work?
 
-// 	DemoFile *p = (DemoFile*)pFile;
+	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s is a nop\n", __func__, p->path);
 // 	if (Fsync9(p->fid)) {
-// 		return SQLITE_IOERR_FSYNC;
+// 		printreturn(SQLITE_IOERR_FSYNC);
 // 	} else {
-		return SQLITE_OK;
+		printreturn(SQLITE_OK);
 // 	}
 }
 
@@ -336,6 +288,7 @@ static int demoSync(sqlite3_file *pFile, int flags){
 */
 static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s\n", __func__, p->path);
 
 	struct Stat9 stat;
 
@@ -344,8 +297,9 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 	}
 
 	*pSize = stat.size;
+	printf("**** %s = %#lx\n", __func__, (long)stat.size);
 
-	return SQLITE_OK;
+	printreturn(SQLITE_OK);
 }
 
 /*
@@ -355,21 +309,29 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 ** file is found in the file-system it is rolled back.
 */
 static int demoLock(sqlite3_file *pFile, int eLock){
-  return SQLITE_OK;
+	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s is a nop\n", __func__, p->path);
+  printreturn(SQLITE_OK);
 }
 static int demoUnlock(sqlite3_file *pFile, int eLock){
-  return SQLITE_OK;
+	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s is a nop\n", __func__, p->path);
+  printreturn(SQLITE_OK);
 }
 static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
+	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s is a nop\n", __func__, p->path);
   *pResOut = 0;
-  return SQLITE_OK;
+  printreturn(SQLITE_OK);
 }
 
 /*
 ** No xFileControl() verbs are implemented by this VFS.
 */
 static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
-  return SQLITE_NOTFOUND;
+	DemoFile *p = (DemoFile*)pFile;
+	printf("**** %s %s op=%d is a nop\n", __func__, p->path, op);
+  printreturn(SQLITE_NOTFOUND);
 }
 
 /*
@@ -410,8 +372,19 @@ static int demoOpen(
     demoDeviceCharacteristics     /* xDeviceCharacteristics */
   };
 
-	static uint32_t fid = 50000; // our own private fid range
-	fid++;
+	printf("**** %s %s flags=%#x\n", __func__, zName, flags);
+
+	uint32_t fid = 0;
+	for (int i=0; i<32; i++) {
+		if ((usedfids & (1 << i)) == 0) {
+			usedfids |= (1 << i);
+			fid = FIRSTFID + i;
+			break;
+		}
+	}
+	if (!fid) panic("sql tmfo");
+
+	printf(" ... fid=%d\n", fid);
 
 	int oflags = 0;
 	if (flags&SQLITE_OPEN_READONLY) oflags |= O_RDONLY;
@@ -420,24 +393,25 @@ static int demoOpen(
 
 	int err = 1;
 
-	Walk9(0 /*ROOTFID*/, fid, 0, NULL, NULL, NULL);
+	Walk9(BASEFID, fid, 0, NULL, NULL, NULL);
 
 	if (flags&SQLITE_OPEN_CREATE) {
-		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) return SQLITE_CANTOPEN;
+		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
 	} else {
-		if (Walk9(fid, fid, 1, (const char *[]){zName}, NULL, NULL)) return SQLITE_CANTOPEN;
-		if (Lopen9(fid, oflags, NULL, NULL)) return SQLITE_CANTOPEN;
+		if (Walk9(fid, fid, 1, (const char *[]){zName}, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
+		if (Lopen9(fid, oflags, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
 	}
 
 	DemoFile *p = (DemoFile *)pFile; /* Populate this structure */
 	memset(p, 0, sizeof(DemoFile));
 	p->fid = fid;
+	p->path = zName;
 	p->base.pMethods = &demoio;
 	if (pOutFlags) {
 		*pOutFlags = flags;
 	}
 
-	return SQLITE_OK;
+	printreturn(SQLITE_OK);
 }
 
 /*
@@ -446,10 +420,11 @@ static int demoOpen(
 ** file has been synced to disk before returning.
 */
 static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
-	if (Unlinkat9(0, zPath, 0)) {
-		return SQLITE_IOERR_DELETE;
+	printf("**** %s %s\n", __func__, zPath);
+	if (Unlinkat9(BASEFID, zPath, 0)) {
+		printreturn(SQLITE_IOERR_DELETE);
 	} else {
-		return SQLITE_OK;
+		printreturn(SQLITE_OK);
 	}
 }
 
@@ -473,16 +448,19 @@ static int demoAccess(
   int flags,
   int *pResOut
 ){
-	int err9 = Walk9(0, 4444, 1, (const char *[]){zPath}, NULL, NULL);
+	printf("**** %s %s flags=%#x\n", __func__, zPath, flags);
+	int err9 = Walk9(BASEFID, SCRATCHFID, 1, (const char *[]){zPath}, NULL, NULL);
 
 	if (err9) {
 		*pResOut = 0;
 	} else {
 		*pResOut = 1;
-		Clunk9(4444);
+		Clunk9(SCRATCHFID);
 	}
 
-	return SQLITE_OK;
+	printf(" ... exists=%d\n", *pResOut);
+
+	printreturn(SQLITE_OK);
 }
 
 
@@ -517,8 +495,9 @@ static int demoFullPathname(
   int nPathOut,                   /* Size of output buffer in bytes */
   char *zPathOut                  /* Pointer to output buffer */
 ){
+	printf("**** %s %s\n", __func__, zPath);
 	strcpy(zPathOut, zPath);
-	return SQLITE_OK;
+	printreturn(SQLITE_OK);
 }
 
 /*
