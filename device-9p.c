@@ -8,7 +8,7 @@ The biggest challenge is that 9P (and Unix in general) only allows file access
 via a known path: supplying the inode number isn't enough.
 
 To allow MacOS clients to access a file by number (called a CNID in HFS), we
-maintain a giant hash table of (CNID) -> (parent's CNID, name) mappings.
+maintain a giant SQLite database with this and other information.
 
 The "File System Manager" (a convenience layer on top of the File Manager) is
 not used because it is unavailable at the start of the boot process.
@@ -35,13 +35,14 @@ not used because it is unavailable at the start of the boot process.
 
 #include "callin68k.h"
 #include "device.h"
-#include "hashtab.h"
+#include "metadb-glue.h"
 #include "multifork.h"
 #include "printf.h"
 #include "panic.h"
 #include "paramblkprint.h"
 #include "patch68k.h"
 #include "9p.h"
+#include "sqlite3.h"
 #include "timing.h"
 #include "transport.h"
 #include "unicode.h"
@@ -112,6 +113,7 @@ static bool isAbs(const unsigned char *path);
 static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsigned char *shorter);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static bool visName(const char *name);
+static void startDB(void);
 static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
 static int32_t getDBParent(int32_t cnid);
@@ -297,6 +299,14 @@ static OSStatus initialize(DriverInitInfo *info) {
 	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
 		return openErr;
 	}
+
+	// Start up the database for catalog IDs and other purposes
+	int direrr = Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
+	if (direrr && direrr!=EEXIST) panic("could not make work directory");
+	direrr = Walk9(ROOTFID, 40000, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
+	if (direrr) panic("bad walk");
+
+	startDB();
 
 	// Read mount_tag from config space into a C string
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)
@@ -952,9 +962,6 @@ static void updateKnownLength(short refnum, int32_t length) {
 
 static OSErr fsOpen(struct HIOParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
-
-	// OpenSync is allowed to move memory
- 	if ((pb->ioTrap & 0x200) == 0) HTallocate();
 
 	pb->ioRefNum = 0;
 
@@ -1879,34 +1886,77 @@ static bool visName(const char *name) {
 	return (name[0] != '.' && !MF.IsSidecar(name));
 }
 
-// Hash table accessors, tuned to minimise slot usage
+static void startDB(void) {
+	int sqerr;
 
-struct rec {
-	int32_t parent;
-	char name[512];
-};
+	// Big memory buffer for "MEMSYS5", instead of using malloc etc
+	static uint32_t dbbuf[64*1024/4];
+	sqerr = sqlite3_config(SQLITE_CONFIG_HEAP, dbbuf, sizeof dbbuf, /*mnReq important*/ 16);
+	if (sqerr != SQLITE_OK) panic("sqlite3_config");
+
+	sqerr = sqlite3_initialize();
+	if (sqerr != SQLITE_OK) panic("sqlite3_initialize");
+
+	sqerr = sqlite3_open("deebee", &metadb);
+	if (sqerr != SQLITE_OK) panic("sqlite3_open");
+
+	char *msg;
+	sqerr = sqlite3_exec(metadb, "CREATE TABLE IF NOT EXISTS catalog (id INTEGER PRIMARY KEY, parentid INTEGER, name BLOB);", NULL, NULL, &msg);
+	printf("err=%s\n", msg);
+	if (sqerr != SQLITE_OK) panic("sqlite3_exec");
+}
 
 static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
-	struct rec rec;
-	rec.parent = pcnid;
-	strcpy(rec.name, name);
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "INSERT OR REPLACE INTO catalog (id, parentid, name) VALUES (?, ?, ?);");
 
-	// Cast away the const -- but the name should not be modified by us
-	HTinstall('$', &cnid, sizeof cnid, &rec, 4+strlen(name)+1); // dodgy size calc
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+	if (sqlite3_bind_int(S, 2, pcnid)) panic("bind2");
+	if (sqlite3_bind_text(S, 3, name, -1, NULL)) panic("bind3");
+
+	if (sqlite3_step(S) != SQLITE_DONE) panic("step");
+
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
 }
 
 // NULL on failure (bad CNID)
 static const char *getDBName(int32_t cnid) {
-	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
-	if (!rec) return NULL;
-	return rec->name;
+	static char ret[512];
+
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
+
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+
+	if (sqlite3_step(S) == SQLITE_ROW) {
+		strcpy(ret, sqlite3_column_text(S, 0));
+	} else {
+		ret[0] = 0;
+	}
+
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
+
+	return ret;
 }
 
 // Zero on failure (bad CNID)
 static int32_t getDBParent(int32_t cnid) {
-	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
-	if (!rec) return 0;
-	return rec->parent;
+	int32_t ret;
+
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
+
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+
+	if (sqlite3_step(S) == SQLITE_ROW) {
+		ret = sqlite3_column_int(S, 0);
+	} else {
+		ret = 0;
+	}
+
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
+
+	return ret;
 }
 
 int32_t mactime(int64_t unixtime) {
@@ -1955,8 +2005,6 @@ static long fsCall(void *pb, long selector) {
 //
 // 		stack += 2;
 // 	}
-
-	HTallocatelater(); // schedule some system task time if needed
 
 	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 
