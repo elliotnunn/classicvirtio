@@ -22,8 +22,6 @@ static bool isAbs(const unsigned char *path);
 static int32_t qid2cnid(struct Qid9 qid);
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
 static void setDB(int32_t cnid, int32_t pcnid, const char *name);
-static const char *getDBName(int32_t cnid);
-static int32_t getDBParent(int32_t cnid);
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -212,27 +210,42 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 
 // Erase the global path variables and set them to the known path of a CNID
 static bool setPath(int32_t cnid) {
-	int nbytes = 0;
-	int npath = 0;
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb,
+		"WITH RECURSIVE hierarchy (id, parentid, name, level) AS ( "
+			"SELECT e.id, e.parentid, e.name, 0 "
+			"FROM catalog e "
+			"WHERE e.id = ? "
 
-	// Preflight: number of components and their total length
-	for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
-		if (i == 0) return true; // bad cnid
-		nbytes += strlen(getDBName(i)) + 1;
-		npath++;
+			"UNION ALL "
+
+			"SELECT e.id, e.parentid, e.name, c.level + 1 "
+			"FROM catalog e "
+			"JOIN hierarchy c ON c.parentid = e.id AND c.parentid != 2 "
+		") "
+		"SELECT id, name FROM hierarchy ORDER BY level DESC; "
+	);
+	// This query is a little hefty, perhaps it could be simplified
+	// and some complexity moved to C code
+
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+
+	pathCompCnt = 0;
+	pathBlobSize = 0;
+
+	int sqerr;
+	while ((sqerr = sqlite3_step(S)) == SQLITE_ROW) {
+		expectCNID[pathCompCnt] = sqlite3_column_int(S, 0);
+		pathComps[pathCompCnt] = pathBlob + pathBlobSize; // a string we will populate below...
+		pathCompCnt++;
+
+		strcpy(pathBlob + pathBlobSize, sqlite3_column_text(S, 1));
+		pathBlobSize += strlen(pathBlob + pathBlobSize) + 1;
 	}
 
-	pathBlobSize = nbytes;
-	pathCompCnt = npath;
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
 
-	for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
-		npath--;
-		expectCNID[npath] = i;
-		const char *name = getDBName(i);
-		nbytes -= strlen(name) + 1;
-		pathComps[npath] = strcpy(pathBlob + nbytes, name);
-	}
-
+	if (sqerr != SQLITE_DONE) panic("bad path query");
 	return false;
 }
 
@@ -346,44 +359,4 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 
 	sqlite3_reset(S);
 	sqlite3_clear_bindings(S);
-}
-
-// NULL on failure (bad CNID)
-static const char *getDBName(int32_t cnid) {
-	static char ret[512];
-
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		strcpy(ret, sqlite3_column_text(S, 0));
-	} else {
-		ret[0] = 0;
-	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	return ret;
-}
-
-// Zero on failure (bad CNID)
-static int32_t getDBParent(int32_t cnid) {
-	int32_t ret;
-
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		ret = sqlite3_column_int(S, 0);
-	} else {
-		ret = 0;
-	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	return ret;
 }
