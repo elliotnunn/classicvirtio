@@ -1601,7 +1601,7 @@ static void startDB(void) {
 	int sqerr;
 
 	// Big memory buffer for "MEMSYS5", instead of using malloc etc
-	static uint32_t dbbuf[64*1024/4];
+	static uint32_t dbbuf[196*1024/4];
 	sqerr = sqlite3_config(SQLITE_CONFIG_HEAP, dbbuf, sizeof dbbuf, /*mnReq important*/ 16);
 	if (sqerr != SQLITE_OK) panic("sqlite3_config");
 
