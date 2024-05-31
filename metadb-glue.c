@@ -192,17 +192,20 @@ struct DemoFile {
   uint32_t fid; // 9P file ID
 };
 
-#define printreturn(x) {printf("         = " #x "\n"); return (x);}
+// #define dbgprintf printf
+// #define dbgprintreturn(x) {printf("         = " #x "\n"); return (x);}
+#define dbgprintf(...)
+#define dbgprintreturn(x) return x;
 
 /*
 ** Close a file.
 */
 static int demoClose(sqlite3_file *pFile){
 	DemoFile *p = (DemoFile *)pFile;
-	printf("**** %s %s\n", __func__, p->path);
+	dbgprintf("**** %s %s\n", __func__, p->path);
 	Clunk9(p->fid);
 	usedfids &= ~(1UL << (p->fid - FIRSTFID));
-	printreturn(SQLITE_OK);
+	dbgprintreturn(SQLITE_OK);
 }
 
 /*
@@ -215,20 +218,20 @@ static int demoRead(
   sqlite_int64 iOfst
 ){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
+	dbgprintf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
 
 	uint32_t gotbytes;
 	if (Read9(p->fid, zBuf, iOfst, iAmt, &gotbytes)) {
-		printreturn(SQLITE_IOERR); // Actual IO error, not just short
+		dbgprintreturn(SQLITE_IOERR); // Actual IO error, not just short
 	}
 
 	// Unread parts of the buffer must be zero-filled
 	memset(zBuf + gotbytes, 0, iAmt - gotbytes);
 
 	if (gotbytes == iAmt) {
-		printreturn(SQLITE_OK);
+		dbgprintreturn(SQLITE_OK);
 	} else {
-		printreturn(SQLITE_IOERR_SHORT_READ);
+		dbgprintreturn(SQLITE_IOERR_SHORT_READ);
 	}
 }
 
@@ -242,17 +245,17 @@ static int demoWrite(
   sqlite_int64 iOfst
 ){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
+	dbgprintf("**** %s %s iOfst=%#lx iAmt=%#x\n", __func__, p->path, (long)iOfst, iAmt);
 
 	uint32_t gotbytes;
 	if (Write9(p->fid, zBuf, iOfst, iAmt, &gotbytes)) {
-		printreturn(SQLITE_IOERR);
+		dbgprintreturn(SQLITE_IOERR);
 	}
 
 	if (gotbytes == iAmt) {
-		printreturn(SQLITE_OK);
+		dbgprintreturn(SQLITE_OK);
 	} else {
-		printreturn(SQLITE_IOERR);
+		dbgprintreturn(SQLITE_IOERR);
 	}
 }
 
@@ -275,11 +278,11 @@ static int demoSync(sqlite3_file *pFile, int flags){
 // ??? the Tfsync call doesn't work?
 
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s is a nop\n", __func__, p->path);
+	dbgprintf("**** %s %s is a nop\n", __func__, p->path);
 // 	if (Fsync9(p->fid)) {
-// 		printreturn(SQLITE_IOERR_FSYNC);
+// 		dbgprintreturn(SQLITE_IOERR_FSYNC);
 // 	} else {
-		printreturn(SQLITE_OK);
+		dbgprintreturn(SQLITE_OK);
 // 	}
 }
 
@@ -288,7 +291,7 @@ static int demoSync(sqlite3_file *pFile, int flags){
 */
 static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s\n", __func__, p->path);
+	dbgprintf("**** %s %s\n", __func__, p->path);
 
 	struct Stat9 stat;
 
@@ -297,9 +300,9 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 	}
 
 	*pSize = stat.size;
-	printf("**** %s = %#lx\n", __func__, (long)stat.size);
+	dbgprintf("**** %s = %#lx\n", __func__, (long)stat.size);
 
-	printreturn(SQLITE_OK);
+	dbgprintreturn(SQLITE_OK);
 }
 
 /*
@@ -310,19 +313,19 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 */
 static int demoLock(sqlite3_file *pFile, int eLock){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s is a nop\n", __func__, p->path);
-  printreturn(SQLITE_OK);
+	dbgprintf("**** %s %s is a nop\n", __func__, p->path);
+  dbgprintreturn(SQLITE_OK);
 }
 static int demoUnlock(sqlite3_file *pFile, int eLock){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s is a nop\n", __func__, p->path);
-  printreturn(SQLITE_OK);
+	dbgprintf("**** %s %s is a nop\n", __func__, p->path);
+  dbgprintreturn(SQLITE_OK);
 }
 static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s is a nop\n", __func__, p->path);
+	dbgprintf("**** %s %s is a nop\n", __func__, p->path);
   *pResOut = 0;
-  printreturn(SQLITE_OK);
+  dbgprintreturn(SQLITE_OK);
 }
 
 /*
@@ -330,8 +333,8 @@ static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
 */
 static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
 	DemoFile *p = (DemoFile*)pFile;
-	printf("**** %s %s op=%d is a nop\n", __func__, p->path, op);
-  printreturn(SQLITE_NOTFOUND);
+	dbgprintf("**** %s %s op=%d is a nop\n", __func__, p->path, op);
+  dbgprintreturn(SQLITE_NOTFOUND);
 }
 
 /*
@@ -372,7 +375,7 @@ static int demoOpen(
     demoDeviceCharacteristics     /* xDeviceCharacteristics */
   };
 
-	printf("**** %s %s flags=%#x\n", __func__, zName, flags);
+	dbgprintf("**** %s %s flags=%#x\n", __func__, zName, flags);
 
 	uint32_t fid = 0;
 	for (int i=0; i<32; i++) {
@@ -384,7 +387,7 @@ static int demoOpen(
 	}
 	if (!fid) panic("sql tmfo");
 
-	printf(" ... fid=%d\n", fid);
+	dbgprintf(" ... fid=%d\n", fid);
 
 	int oflags = 0;
 	if (flags&SQLITE_OPEN_READONLY) oflags |= O_RDONLY;
@@ -396,10 +399,10 @@ static int demoOpen(
 	Walk9(BASEFID, fid, 0, NULL, NULL, NULL);
 
 	if (flags&SQLITE_OPEN_CREATE) {
-		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
+		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
 	} else {
-		if (Walk9(fid, fid, 1, (const char *[]){zName}, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
-		if (Lopen9(fid, oflags, NULL, NULL)) printreturn(SQLITE_CANTOPEN);
+		if (Walk9(fid, fid, 1, (const char *[]){zName}, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
+		if (Lopen9(fid, oflags, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
 	}
 
 	DemoFile *p = (DemoFile *)pFile; /* Populate this structure */
@@ -411,7 +414,7 @@ static int demoOpen(
 		*pOutFlags = flags;
 	}
 
-	printreturn(SQLITE_OK);
+	dbgprintreturn(SQLITE_OK);
 }
 
 /*
@@ -420,11 +423,11 @@ static int demoOpen(
 ** file has been synced to disk before returning.
 */
 static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
-	printf("**** %s %s\n", __func__, zPath);
+	dbgprintf("**** %s %s\n", __func__, zPath);
 	if (Unlinkat9(BASEFID, zPath, 0)) {
-		printreturn(SQLITE_IOERR_DELETE);
+		dbgprintreturn(SQLITE_IOERR_DELETE);
 	} else {
-		printreturn(SQLITE_OK);
+		dbgprintreturn(SQLITE_OK);
 	}
 }
 
@@ -448,7 +451,7 @@ static int demoAccess(
   int flags,
   int *pResOut
 ){
-	printf("**** %s %s flags=%#x\n", __func__, zPath, flags);
+	dbgprintf("**** %s %s flags=%#x\n", __func__, zPath, flags);
 	int err9 = Walk9(BASEFID, SCRATCHFID, 1, (const char *[]){zPath}, NULL, NULL);
 
 	if (err9) {
@@ -458,9 +461,9 @@ static int demoAccess(
 		Clunk9(SCRATCHFID);
 	}
 
-	printf(" ... exists=%d\n", *pResOut);
+	dbgprintf(" ... exists=%d\n", *pResOut);
 
-	printreturn(SQLITE_OK);
+	dbgprintreturn(SQLITE_OK);
 }
 
 
@@ -495,9 +498,9 @@ static int demoFullPathname(
   int nPathOut,                   /* Size of output buffer in bytes */
   char *zPathOut                  /* Pointer to output buffer */
 ){
-	printf("**** %s %s\n", __func__, zPath);
+	dbgprintf("**** %s %s\n", __func__, zPath);
 	strcpy(zPathOut, zPath);
-	printreturn(SQLITE_OK);
+	dbgprintreturn(SQLITE_OK);
 }
 
 /*
