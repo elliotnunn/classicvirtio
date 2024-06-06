@@ -1449,6 +1449,21 @@ trycreate:
 	return err;
 }
 
+int DeleteSidecar(int32_t cnid, const char *fmt) {
+	int err;
+
+	err = browse(FID1, cnid, "");
+	if (err < 0) return ENOENT;
+
+	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
+
+	char sidename[1024]; // like file.rdump or ._file
+	sprintf(sidename, fmt, getDBName(cnid));
+
+	Unlinkat9(FID1, sidename, 0);
+	return 0;
+}
+
 // Divine the meaning of ioVRefNum and ioDirID
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;
