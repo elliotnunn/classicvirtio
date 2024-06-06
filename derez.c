@@ -8,7 +8,15 @@
 
 #include "derez.h"
 
+#define READ16BE(S) ((255 & (S)[0]) << 8 | (255 & (S)[1]))
+#define READ24BE(S) \
+  ((uint32_t)(255 & (S)[0]) << 16 | \
+   (uint32_t)(255 & (S)[1]) << 8 | \
+   (uint32_t)(255 & (S)[2]))
+
 static char *lutget(char *dest, const char *lut, char letter);
+static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name);
+static void derezBody(uint32_t len);
 
 // Escape code lookup table for quoted strings
 // (needs tweaking to switch between single and double quoted strings)
@@ -46,6 +54,52 @@ static const char lut[5*256] =
 	"\\0xF0"     "\\0xF1"     "\\0xF2"     "\\0xF3"     "\\0xF4"     "\\0xF5"     "\\0xF6"     "\\0xF7"
 	"\\0xF8"     "\\0xF9"     "\\0xFA"     "\\0xFB"     "\\0xFC"     "\\0xFD"     "\\0xFE"     "\\0xFF";
 
+void DeRez(uint32_t forkfid, uint32_t textfid) {
+	char rbuf[8*1024], wbuf[32*1024];
+
+	uint32_t head[4];
+	Read9(forkfid, head, 0, sizeof head, NULL);
+	char map[64*1024];
+	Read9(forkfid, map, head[1], head[3], NULL);
+
+	char *tl = map + READ16BE(map+24);
+	char *nl = map + READ16BE(map+26);
+
+	int nt = (uint16_t)(READ16BE(tl) + 1);
+
+	SetRead(forkfid, rbuf, sizeof rbuf);
+	SetWrite(textfid, wbuf, sizeof wbuf);
+
+	for (int i=0; i<nt; i++) {
+		char *t = tl + 2 + 8*i;
+		int nr = READ16BE(t+4) + 1;
+		int r1 = READ16BE(t+6);
+		for (int j=0; j<nr; j++) {
+			char *r = tl + r1 + 12*j;
+
+			int16_t id = READ16BE(r);
+			uint16_t nameoff = READ16BE(r+2);
+			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
+			uint8_t attr = *(r+4);
+			uint32_t contoff = READ24BE(r+5);
+
+			derezHeader(attr, t, id, name);
+
+			rbufseek = head[0] + contoff;
+			uint32_t len = 0;
+			for (int i=0; i<4; i++) {
+				len = (len << 8) | (uint8_t)Read();
+			}
+			derezBody(len);
+			Write('}');
+			Write(';');
+			Write('\n');
+			Write('\n');
+		}
+	}
+
+	Flush();
+}
 
 static char *lutget(char *dest, const char *lut, char letter) {
 	lut += 5 * (255 & letter);
@@ -56,7 +110,7 @@ static char *lutget(char *dest, const char *lut, char letter) {
 	return dest;
 }
 
-void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
+static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	char header[2048] = "data '";
 	char *p = header + 6;
 
@@ -101,7 +155,7 @@ void DerezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	WriteBuf(header, p-header);
 }
 
-void DerezBody(uint32_t len) {
+static void derezBody(uint32_t len) {
 	char hex[] = "0123456789ABCDEF";
 
 	while (len) {

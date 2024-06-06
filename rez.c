@@ -1,22 +1,165 @@
 /* Copyright (c) 2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "9buf.h"
 #include "panic.h"
 #include "printf.h"
 
 #include "rez.h"
 
-#include <string.h>
+struct res {
+	uint32_t type;
+	int16_t id;
+	uint16_t nameoff;
+	uint32_t attrandoff;
+};
 
+static int rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]);
+static int32_t rezBody(void);
 static bool isword(const char *word);
 static void wspace();
 static int quote(char mark, void *dest, int max);
 static int hex(char ch);
 static long integer(void);
+static int resorder(const void *a, const void *b);
+
+uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
+	printf("Rez textfid=%d forkfid=%d\n", textfid, forkfid);
+
+	int err;
+	int nres = 0;
+	struct res resources[2727]; // see Guide to the File System Manager v1.2 pD-3
+	char namelist[0x10000];
+
+	// sizes for pointer calculations
+	size_t contentsize=0, namesize=0;
+
+	// Hefty stack IO buffer, rededicate to reading after writes done
+	enum {WB = 8*1024, RB = 32*1024};
+	char buf[WB+RB];
+	SetWrite(forkfid, buf, WB);
+	SetRead(textfid, buf+WB, RB);
+	wbufat = wbufseek = 256;
+
+	// Slurp the Rez file sequentially, acquiring:
+	// type/id/attrib/bodyoffset/nameoffset into resources array
+	// name into namelist
+	// actual data into scratch file
+	for (;;) {
+		struct res r;
+		uint8_t attrib;
+		bool hasname;
+		unsigned char name[256];
+
+		int j = rezHeader(&attrib, &r.type, &r.id, &hasname, name);
+		printf("rezHeader returns %d\n", j);
+		if (j) break;
+
+		int32_t rezoffset = rbufseek;
+
+		int32_t bodylen;
+		int64_t fixup = wbufseek;
+		for (int i=0; i<4; i++) Write(0);
+		bodylen = rezBody();
+		Overwrite(&bodylen, fixup, 4);
+		if (bodylen < 0) panic("failed to read Rez body");
+
+		if (nres >= sizeof resources/sizeof *resources) {
+			panic("too many resources in file");
+		}
+
+		// append the name to the packed name list
+		if (hasname) {
+			if (namesize + 1 + name[0] > 0x10000)
+				panic("filled name buffer");
+			r.nameoff = namesize;
+			memcpy(namelist + namesize, name, 1 + name[0]);
+			namesize += 1 + name[0];
+		} else {
+			r.nameoff = 0xffff;
+		}
+
+		r.attrandoff = contentsize | ((uint32_t)attrib << 24);
+
+		resources[nres++] = r;
+		contentsize += 4 + bodylen;
+	}
+
+	// We will no longer use the read buffer, rededicate it to write buffer
+	wbufsize = WB + RB;
+
+	// Group resources of the same type together and count unique types
+	qsort(resources, nres, sizeof *resources, resorder);
+	int ntype = 0;
+	for (int i=0; i<nres; i++) {
+		if (i==0 || resources[i-1].type!=resources[i].type) ntype++;
+	}
+
+	// Resource map header
+	for (int i=0; i<25; i++) Write(0);
+	Write(28); // offset to type list
+	Write((28 + 2 + 8*ntype + 12*nres) >> 8); // offset to name
+	Write((28 + 2 + 8*ntype + 12*nres) >> 0);
+	Write((ntype - 1) >> 8); // resource types in the map minus 1
+	Write((ntype - 1) >> 0);
+
+	// Resource type list
+	int base = 2 + 8*ntype;
+	int ott = 0;
+	for (int i=0; i<nres; i++) {
+		if (i==nres-1 || resources[i].type!=resources[i+1].type) {
+			// last resource of this type
+			Write(resources[i].type >> 24);
+			Write(resources[i].type >> 16);
+			Write(resources[i].type >> 8);
+			Write(resources[i].type >> 0);
+			Write(ott >> 8);
+			Write(ott >> 0);
+			Write(base >> 8);
+			Write(base >> 0);
+			base += 12 * (ott + 1);
+			ott = 0;
+		} else {
+			ott++;
+		}
+	}
+
+	// Resource reference list
+	for (int i=0; i<nres; i++) {
+		Write(resources[i].id >> 8);
+		Write(resources[i].id >> 0);
+		Write(resources[i].nameoff >> 8);
+		Write(resources[i].nameoff >> 0);
+		Write(resources[i].attrandoff >> 24);
+		Write(resources[i].attrandoff >> 16);
+		Write(resources[i].attrandoff >> 8);
+		Write(resources[i].attrandoff >> 0);
+		for (int i=0; i<4; i++) Write(0);
+	}
+
+	for (int i=0; i<namesize; i++) {
+		Write(namelist[i]);
+	}
+
+	Flush();
+
+	uint32_t head[4] = {
+		256,
+		256+contentsize,
+		contentsize,
+		28+2+8*ntype+12*nres+namesize
+	};
+
+	Write9(forkfid, head, 0, sizeof head, NULL);
+
+	return 256+contentsize+28+2+8*ntype+12*nres+namesize;
+}
 
 // zero is good, negatives are errors
-int RezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]) {
+static int rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]) {
 	*attrib = 0;
 	*hasname = false;
 
@@ -110,7 +253,7 @@ nocomma:
 }
 
 // return number of resource bytes on success, or negative on error (e.g. -EIO)
-int32_t RezBody(void) {
+static int32_t rezBody(void) {
 	int32_t got = 0;
 
 	wspace();
@@ -131,8 +274,7 @@ int32_t RezBody(void) {
 			if (hex(y)>=0) {
 				pendhex = (pendhex << 4) | hex(y);
 				if (pendhex & 0x100) {
-					int err = Write(pendhex);
-					if (err) return -err;
+					Write(pendhex);
 
 					got++;
 					pendhex = 1;
@@ -262,5 +404,21 @@ static long integer(void) {
 		} else {
 			return mag * sgn;
 		}
+	}
+}
+
+static int resorder(const void *a, const void *b) {
+	const struct res *aa = a, *bb = b;
+
+	if (aa->type > bb->type) {
+		return 1;
+	} else if (aa->type == bb->type) {
+		if (aa->id > bb->id) {
+			return 1;
+		} else {
+			return -1;
+		}
+	} else {
+		return -1;
 	}
 }
