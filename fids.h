@@ -1,0 +1,9 @@
+#pragma once
+
+enum {
+	ROOTFID = 0,
+	DOTDIRFID = 1,
+	FIRSTFID_DEV9P = 2,
+	FIRSTFID_MULTIFORK = 8,
+	FIRSTFID_CATALOG = 16,
+};

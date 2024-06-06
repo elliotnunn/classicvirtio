@@ -20,6 +20,7 @@ Uses the hashtab (mea culpa)
 #include "9buf.h"
 #include "9p.h"
 #include "derez.h"
+#include "fids.h"
 #include "hashtab.h"
 #include "panic.h"
 #include "printf.h"
@@ -32,12 +33,11 @@ Uses the hashtab (mea culpa)
 
 // Fids 8-15 are reserved for the multifork layer
 enum {
-	ROOTFID = 0,
-	DIRFID = 8, // where we keep our junk
-	RESFORKFID = 9, // actual resource formatted file in a hidden place
-	REZFID = 10, // Rez code in a public place
-	FINFOFID = 11,
-	TMPFID = 12,
+	DIRFID = FIRSTFID_MULTIFORK,
+	RESFORKFID, // actual resource formatted file in a hidden place
+	REZFID, // Rez code in a public place
+	FINFOFID,
+	TMPFID,
 	MAXFORK = 0x1100000,
 };
 
@@ -59,7 +59,7 @@ static int init3(void) {
 	int err;
 
 	for (;;) { // essentially mkdir -p
-		err = Walk9(1, DIRFID, 1, (const char *[]){"resforks"}, NULL, NULL);
+		err = Walk9(DOTDIRFID, DIRFID, 1, (const char *[]){"resforks"}, NULL, NULL);
 		if (!err) break;
 		if (err != ENOENT) panic("unexpected mkdir-walk err");
 		err = Mkdir9(1, 0777, 0, "resforks", NULL);

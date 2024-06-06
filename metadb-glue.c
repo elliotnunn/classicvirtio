@@ -1,6 +1,7 @@
 // The bread around the sqlite3.c sandwich
 
 #include "9p.h"
+#include "fids.h"
 #include "panic.h"
 #include "printf.h"
 #include "sqlite3.h"
@@ -162,7 +163,6 @@ void localtime(void) {
 #include <string.h>
 
 enum {
-	BASEFID = 1, // the directory where all db files are made
 	FIRSTFID = 50000, // first of 32 scratch fids
 	SCRATCHFID = 49999, // for playing around
 };
@@ -396,7 +396,7 @@ static int demoOpen(
 
 	int err = 1;
 
-	Walk9(BASEFID, fid, 0, NULL, NULL, NULL);
+	Walk9(DOTDIRFID, fid, 0, NULL, NULL, NULL);
 
 	if (flags&SQLITE_OPEN_CREATE) {
 		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
@@ -424,7 +424,7 @@ static int demoOpen(
 */
 static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
 	dbgprintf("**** %s %s\n", __func__, zPath);
-	if (Unlinkat9(BASEFID, zPath, 0)) {
+	if (Unlinkat9(DOTDIRFID, zPath, 0)) {
 		dbgprintreturn(SQLITE_IOERR_DELETE);
 	} else {
 		dbgprintreturn(SQLITE_OK);
@@ -452,7 +452,7 @@ static int demoAccess(
   int *pResOut
 ){
 	dbgprintf("**** %s %s flags=%#x\n", __func__, zPath, flags);
-	int err9 = Walk9(BASEFID, SCRATCHFID, 1, (const char *[]){zPath}, NULL, NULL);
+	int err9 = Walk9(DOTDIRFID, SCRATCHFID, 1, (const char *[]){zPath}, NULL, NULL);
 
 	if (err9) {
 		*pResOut = 0;

@@ -4,6 +4,7 @@
 #include <Errors.h>
 
 #include "9p.h"
+#include "fids.h"
 #include "metadb-glue.h"
 #include "panic.h"
 #include "printf.h"
@@ -12,8 +13,11 @@
 
 #include "catabrowse.h"
 
-#define ROOTFID 0
-#define FIDBROWSE 16
+enum {
+	FIDBROWSE = FIRSTFID_CATALOG,
+};
+
+#define MAXDEPTH 16
 
 static bool setPath(int32_t cnid);
 static bool appendRelativePath(const unsigned char *path);

@@ -9,6 +9,7 @@ Implementation of the 1-file multifork format
 #include <Memory.h>
 
 #include "9p.h"
+#include "fids.h"
 #include "panic.h"
 #include "printf.h"
 
@@ -18,7 +19,7 @@ Implementation of the 1-file multifork format
 
 // Fids 8-15 are reserved for the multifork layer
 enum {
-	FID1 = 8,
+	FID1 = FIRSTFID_MULTIFORK,
 };
 
 // Per-open-file information hidden inside FCB, maximum 12 bytes

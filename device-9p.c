@@ -30,6 +30,7 @@ not used because it is unavailable at the start of the boot process.
 #include "callin68k.h"
 #include "catabrowse.h"
 #include "device.h"
+#include "fids.h"
 #include "metadb-glue.h"
 #include "multifork.h"
 #include "printf.h"
@@ -63,12 +64,10 @@ enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
 	// so if the dispatch mechanism changes, this constant must change:
 	FSID = ('9'<<8) | 'p',
-	ROOTFID = 0,
-	CACHEFID = 1,
-	FID1 = 2,
-	FID2 = 3,
-	FID3 = 4,
-	FIDPERSIST = 5,
+	FID1 = FIRSTFID_DEV9P,
+	FID2,
+	FID3,
+	FIDPERSIST,
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 256 * 1024, // large stack bc memory is so hard to allocate
@@ -284,7 +283,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Start up the database for catalog IDs and other purposes
 	int direrr = Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (direrr && direrr!=EEXIST) panic("could not make work directory");
-	direrr = Walk9(ROOTFID, CACHEFID, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
+	direrr = Walk9(ROOTFID, DOTDIRFID, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
 	if (direrr) panic("bad walk");
 
 	startDB();
