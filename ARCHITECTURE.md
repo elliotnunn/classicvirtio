@@ -46,3 +46,20 @@
 │                                              │  │                                              │
 └──────────────────────────────────────────────┘  └──────────────────────────────────────────────┘
 ```
+
+# 9P fids
+
+The canonical text on 9p "file IDs" is here:
+http://ericvh.github.io/9p-rfc/rfc9p2000.html
+
+Our 9P layer keeps a bitmask of the fids 0 through 31, and when it
+catches an invalid attempt to open an already-open one, it transparently
+issues a Tclunk first, to make everything succeed. These 32 special fids
+are distributed among source files manually:
+
+- 0-31 are auto-closed by 9p.c when re-use is attempted
+- 0 = root
+- 1 = .classicvirtio.nosync.noindex
+- 2-7 = device-9p.c
+- 8-15 = multifork-\*.c
+- 16-23 = catalog.c

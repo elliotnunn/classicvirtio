@@ -12,13 +12,6 @@ maintain a giant SQLite database with this and other information.
 
 The "File System Manager" (a convenience layer on top of the File Manager) is
 not used because it is unavailable at the start of the boot process.
-
-9P FID allocation:
-0-31 are auto-closed by 9p.c when re-use is attempted
-0 root
-1-7 misc use by various functions in this file
-8-15 multifork file access layer
-16 browse catalog layer
 */
 
 #include <Disks.h>
@@ -244,7 +237,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	regentryid = info->deviceEntry;
 	sprintf(logprefix, ".Virtio9P(%d) ", info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-// 		logenable = 1;
+		logenable = 1;
 // 	}
 
 	printf("Starting\n");
