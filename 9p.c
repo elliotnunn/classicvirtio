@@ -330,7 +330,7 @@ int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret) {
 	                      // ctime_sec[8] ctime_nsec[8] btime_sec[8]
 	                      // btime_nsec[8] gen[8] data_version[8]
 
-	transact(Tgetattr, "dq", "qQdddqqqqqqqqqqqqqqq",
+	return transact(Tgetattr, "dq", "qQdddqqqqqqqqqqqqqqq",
 		fid, request_mask,
 
 		// very many return fields
@@ -348,7 +348,7 @@ int Setattr9(uint32_t fid, uint32_t request_mask, struct Stat9 to) {
                           // atime_sec[8] atime_nsec[8] mtime_sec[8] mtime_nsec[8]
 	enum {Rsetattr = 27}; // size[4] Rsetattr tag[2]
 
-	transact(Tsetattr, "dddddqqqqq", "",
+	return transact(Tsetattr, "dddddqqqqq", "",
 		fid, request_mask,
 		to.mode, to.uid, to.gid, to.size,
 		to.atime_sec, to.atime_nsec, to.mtime_sec, to.mtime_nsec);
