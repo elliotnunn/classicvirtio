@@ -60,8 +60,10 @@ int Overwrite(void *buf, uint64_t at, uint32_t cnt) {
 }
 
 int Flush(void) {
-	int err = Write9(wfid, wbuf, wbufat, wbufcnt, NULL);
-	if (err) return err;
+	if (wbufcnt > 0) {
+		int err = Write9(wfid, wbuf, wbufat, wbufcnt, NULL);
+		if (err) panic("9buf flush fail");
+	}
 	wbufat = wbufseek;
 	wbufcnt = 0;
 	return 0;
