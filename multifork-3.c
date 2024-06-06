@@ -33,9 +33,11 @@ Uses the hashtab (mea culpa)
 // Fids 8-15 are reserved for the multifork layer
 enum {
 	ROOTFID = 0,
-	FIDBIG = 8,
-	FID1 = 9,
-	MAXRES = 5459, // max resources per file
+	DIRFID = 8, // where we keep our junk
+	RESFORKFID = 9, // actual resource formatted file in a hidden place
+	REZFID = 10, // Rez code in a public place
+	FINFOFID = 11,
+	TMPFID = 12,
 	MAXFORK = 0x1100000,
 };
 
@@ -46,39 +48,26 @@ struct openfile {
 	int32_t cnid;
 };
 
-struct res {
-	uint32_t type;
-	int16_t id;
-	uint16_t nameoff;
-	uint32_t attrandoff;
-};
-
 int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt); // borrowed from device-9p.c
 
-static struct cacherec *cacheResourceFork(int32_t cnid, uint32_t fid, const char *name);
-static uint32_t readin(uint32_t rezfid, uint32_t scratchfid, uint64_t offset);
-static void writeout(uint32_t scratchfid, uint64_t offset, uint32_t rezfid);
-static int resorder(const void *a, const void *b);
-static int tempfile(void);
+static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
+static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid);
+static void flushResourceFork(int32_t cnid, uint32_t cachefid);
 // no need to prototype init3, open3 etc... they are used once at bottom of file
-
-uint64_t tempfilelen;
 
 static int init3(void) {
 	int err;
 
-	err = tempfile();
-	if (err) return err;
+	for (;;) { // essentially mkdir -p
+		err = Walk9(1, DIRFID, 1, (const char *[]){"resforks"}, NULL, NULL);
+		if (!err) break;
+		if (err != ENOENT) panic("unexpected mkdir-walk err");
+		err = Mkdir9(1, 0777, 0, "resforks", NULL);
+		if (err && err != EEXIST)  panic("unexpected mkdir err");
+	}
 
 	return 0;
 }
-
-struct cacherec {
-	uint64_t sec, nsec, offset;
-	uint32_t size;
-	uint16_t opencount;
-	bool dirty;
-};
 
 static int open3(void *opaque, short refnum, int32_t cnid, uint32_t fid, const char *name, bool resfork, bool write) {
 	struct openfile *s = opaque;
@@ -100,7 +89,7 @@ static int open3(void *opaque, short refnum, int32_t cnid, uint32_t fid, const c
 		err = Lopen9(s->fid, O_RDONLY, NULL, NULL);
 		return err;
 	} else {
-		cacheResourceFork(cnid, fid, name);
+		openResourceFork(cnid, fid, name, s->fid);
 		return noErr;
 	}
 }
@@ -111,29 +100,8 @@ static int close3(void *opaque) {
 	if (!s->resfork) {
 		return Clunk9(s->fid);
 	} else {
-		struct cacherec *c = HTlookup('R', &s->cnid, sizeof s->cnid);
-		c->opencount--;
-		if (c->opencount>0 || !c->dirty) return 0;
-
-		if (c->size == 0) { // sidecar file should be absent
-			int err = OpenSidecar(FID1, s->cnid, O_WRONLY, "%s.rdump");
-			if (!err) Remove9(FID1);
-
-			c->sec = 0;
-			c->nsec = 1;
-		} else { // sidecar file should be present, even if empty
-			int err = OpenSidecar(FID1, s->cnid, O_WRONLY|O_CREAT|O_TRUNC, "%s.rdump");
-			if (err) panic("sidecar failure");
-
-			writeout(FIDBIG, c->offset, FID1);
-
-			struct Stat9 stat;
-			if (Getattr9(FID1, STAT_MTIME, &stat)) panic("stat failed should be ok");
-			c->sec = stat.mtime_sec;
-			c->nsec = stat.mtime_nsec;
-
-			Clunk9(FID1);
-		}
+		flushResourceFork(s->cnid, s->fid);
+		Clunk9(s->fid);
 		return 0;
 	}
 }
@@ -141,69 +109,34 @@ static int close3(void *opaque) {
 static int read3(void *opaque, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	struct openfile *s = opaque;
 
-	if (!s->resfork) {
-		return Read9(s->fid, buf, offset, count, actual_count);
-	} else {
-		struct cacherec *c = HTlookup('R', &s->cnid, sizeof s->cnid);
-
-		// Prevent reads beyond bounds
-		if (offset > c->size) {
-			if (actual_count) *actual_count = 0;
-			return 0;
-		} else if (offset + count > c->size) {
-			count = c->size - offset;
-		}
-
-		return Read9(FIDBIG, buf, c->offset+offset, count, actual_count);
-	}
+	return Read9(s->fid, buf, offset, count, actual_count);
 }
 
 static int write3(void *opaque, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	struct openfile *s = opaque;
 
-	if (!s->resfork) {
-		return Write9(s->fid, buf, offset, count, actual_count);
-	} else {
-		struct cacherec *c = HTlookup('R', &s->cnid, sizeof s->cnid);
-
-		// Prevent reads beyond bounds
-		if (offset + count > MAXFORK) {
-			if (actual_count) *actual_count = 0;
-			return EFBIG;
-		}
-
-		c->dirty = true;
-		if (c->size < offset + count) c->size = offset + count;
-
-		return Write9(FIDBIG, buf, c->offset+offset, count, actual_count);
-	}
+	return Write9(s->fid, buf, offset, count, actual_count);
 }
 
 static int geteof3(void *opaque, uint64_t *len) {
 	struct openfile *s = opaque;
 
-	if (!s->resfork) {
-		struct Stat9 stat = {};
-		int err = Getattr9(s->fid, STAT_SIZE, &stat);
-		if (err) return err;
-		*len = stat.size;
-	} else {
-		struct cacherec *c = HTlookup('R', &s->cnid, sizeof s->cnid);
-		*len = c->size;
-	}
+	struct Stat9 stat = {};
+	int err = Getattr9(s->fid, STAT_SIZE, &stat);
+	if (err) return err;
+	*len = stat.size;
+
 	return 0;
 }
 
 static int seteof3(void *opaque, uint64_t len) {
 	struct openfile *s = opaque;
 
-	if (!s->resfork) {
-		return Setattr9(s->fid, SET_SIZE, (struct Stat9){.size=len});
-	} else {
-		if (len > MAXFORK) return EFBIG;
-		struct cacherec *c = HTlookup('R', &s->cnid, sizeof s->cnid);
-		if (len != c->size) c->dirty = true;
-		c->size = len;
+	int err = Setattr9(s->fid, SET_SIZE, (struct Stat9){.size=len});
+	if (err) return err;
+
+	if (s->resfork) {
+		flushResourceFork(s->cnid, s->fid);
 	}
 
 	return 0;
@@ -229,9 +162,11 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 
 	// Very costly: ensure the resource fork has been Rezzed into the cache
 	if ((fields & MF_RSIZE) || (fields & MF_TIME)) {
-		struct cacherec *c = cacheResourceFork(cnid, fid, name);
-		attr->rsize = c->size;
-		if (attr->unixtime < c->sec) attr->unixtime = c->sec;
+		struct Stat9 rstat = {};
+		statResourceFork(cnid, fid, name, &rstat);
+
+		attr->rsize = rstat.size;
+		if (attr->unixtime < rstat.mtime_sec) attr->unixtime = rstat.mtime_sec;
 	}
 
 	// Costly: read the Finder info
@@ -241,11 +176,11 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 		strcpy(iname, name);
 		strcat(iname, ".idump");
 
-		if (!Walk9(fid, FID1, 2, (const char *[]){"..", iname}, NULL, NULL)
+		if (!Walk9(fid, FINFOFID, 2, (const char *[]){"..", iname}, NULL, NULL)
 				&&
-				!Lopen9(FID1, O_RDONLY, NULL, NULL)) {
-			Read9(FID1, attr->finfo, 0, 8, NULL);
-			Clunk9(FID1);
+				!Lopen9(FINFOFID, O_RDONLY, NULL, NULL)) {
+			Read9(FINFOFID, attr->finfo, 0, 8, NULL);
+			Clunk9(FINFOFID);
 		}
 	}
 
@@ -261,19 +196,19 @@ int fsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, con
 	}
 
 	if (fields & MF_FINFO) {
-		int err = Walk9(fid, FID1, 1, (const char *[]){".."}, NULL, NULL);
+		int err = Walk9(fid, FINFOFID, 1, (const char *[]){".."}, NULL, NULL);
 		if (err) panic("dot-dot should never fail");
 
 		char iname[1024];
 		strcpy(iname, name);
 		strcat(iname, ".idump");
-		err = Lcreate9(FID1, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL);
+		err = Lcreate9(FINFOFID, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL);
 		if (err) return err;
 
-		err = Write9(FID1, attr->finfo, 0, 8, NULL);
+		err = Write9(FINFOFID, attr->finfo, 0, 8, NULL);
 		if (err) return err;
 
-		Clunk9(FID1);
+		Clunk9(FINFOFID);
 	}
 
 	return 0;
@@ -309,10 +244,10 @@ static int move3(uint32_t fid1, const char *name1, uint32_t fid2, const char *na
 }
 
 static int del3(uint32_t fid, const char *name, bool isdir) {
-	Walk9(fid, FID1, 1, (const char *[]){".."}, NULL, NULL);
+	Walk9(fid, TMPFID, 1, (const char *[]){".."}, NULL, NULL);
 
 	if (isdir) {
-		return Unlinkat9(FID1, name, 0x200 /*AT_REMOVEDIR*/);
+		return Unlinkat9(TMPFID, name, 0x200 /*AT_REMOVEDIR*/);
 	} else {
 		// The main file must be deleted,
 		// then delete the sidecars on a best-effort basis
@@ -320,7 +255,7 @@ static int del3(uint32_t fid, const char *name, bool isdir) {
 		for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
 			char delname[1024];
 			sprintf(delname, sidecars[i], name);
-			int err = Unlinkat9(FID1, delname, 0);
+			int err = Unlinkat9(TMPFID, delname, 0);
 			if (err && i==0) return err;
 		}
 	}
@@ -354,264 +289,130 @@ struct MFImpl MF3 = {
 	.IsSidecar = &issidecar3,
 };
 
-static struct cacherec *cacheResourceFork(int32_t cnid, uint32_t fid, const char *name) {
-	// Ensure the file has a cache entry (by CNID), and get a pointer
-	struct cacherec *c = HTlookup('R', &cnid, sizeof cnid);
-	if (!c) {
-		struct cacherec new = {.offset = tempfilelen};
-		tempfilelen += MAXFORK;
-		HTinstall('R', &cnid, sizeof cnid, &new, sizeof new);
-		c = HTlookup('R', &cnid, sizeof cnid);
-	}
+// This function is idempotent. It brings the cached resource fork up to date and stats it.
+// Nothing is left open upon return.
 
-	// Navigate to the sidecar file (.rdump)
+// For posterity: while writing this code I gave up on writing atomic AND consistent 9P calls,
+// and decided to implement the "conch" system.
+static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
+	int err;
+
+// 	printf("statResourceFork cnid=%08x mainfid=%d name=%s\n", cnid, mainfid, name);
+
+	bool sidecarExists = false; // if so, it will be open read-only at REZFID
+	bool cacheExists = false;
+	struct Stat9 sidecarStat, cacheStat;
+
+	// Navigate to the sidecar file (.rdump), check for existence, get mtime (if applicable), don't open
 	char rname[1024];
-	strcpy(rname, name);
-	strcat(rname, ".rdump");
-	int sidecarerr = Walk9(fid, FID1, 2, (const char *[]){"..", rname}, NULL, NULL);
-
-	// Get the sidecar file's age (only if it exists and isn't already open)
-	struct Stat9 stat = {.mtime_nsec=1}; // fake time matches nothing
-	if (c->opencount==0 && sidecarerr==0) {
-		Getattr9(FID1, STAT_MTIME, &stat);
+	sprintf(rname, "%s.rdump", name);
+	err = Walk9(mainfid, REZFID, 2, (const char *[]){"..", rname}, NULL, NULL);
+	if (!err) {
+		if (Getattr9(REZFID, STAT_MTIME|STAT_SIZE, &sidecarStat))
+			panic("failed stat sidecar");
+		sidecarExists = true;
 	}
 
-	// Do we need a costly parse of the sidecar file?
-	if (sidecarerr) {
-		// Empty resource fork
-		c->size = 0;
-	} else if (c->opencount==0 && (c->sec!=stat.mtime_sec || c->nsec!=stat.mtime_nsec)) {
-		// Stale cached resource fork needs rereading
-		if (Lopen9(FID1, O_RDONLY, NULL, NULL)) panic("could not open rdump");
-		c->size = readin(FID1, FIDBIG, c->offset);
-		Clunk9(FID1);
-	} else {
-		// Valid cached resource fork
+	// Navigate to the hidden cache file, check for existence, get mtime (if applicable), don't open
+	char cachename[12]; // enough room to append .tmp also
+	sprintf(cachename, "%08x", cnid);
+	if (!Walk9(DIRFID, RESFORKFID, 1, (const char *[]){cachename}, NULL, NULL)) {
+		if (Getattr9(RESFORKFID, STAT_MTIME|STAT_SIZE, &cacheStat))
+			panic("failed stat extant res cache");
+		cacheExists = true;
 	}
 
-	c->opencount++;
-	return c;
-}
+	// Simple case: is a costly parse needed?
+// 	printf("rdump file: exists=%d mtime=%08lx%08lx.%08lx\n",
+// 		sidecarExists, (long)(sidecarStat.mtime_sec >> 32), (long)sidecarStat.mtime_sec, (long)sidecarStat.mtime_nsec);
+// 	printf("cache file: exists=%d mtime=%08lx%08lx.%08lx\n",
+// 		cacheExists, (long)(cacheStat.mtime_sec >> 32), (long)cacheStat.mtime_sec, (long)cacheStat.mtime_nsec);
 
-static uint32_t readin(uint32_t rezfid, uint32_t scratchfid, uint64_t offset) {
-	int err;
-	int nres = 0;
-	struct res resources[MAXRES];
-	char namelist[0x10000];
+	char tmpname[16];
+	sprintf(tmpname, "%08x.tmp", cnid);
 
-	// sizes for pointer calculations
-	size_t contentsize=0, namesize=0;
+	if (sidecarExists) {
+		if (!cacheExists ||
+			sidecarStat.mtime_sec>cacheStat.mtime_sec ||
+			sidecarStat.mtime_sec==cacheStat.mtime_sec && sidecarStat.mtime_nsec>cacheStat.mtime_nsec
+		) {
+// 			printf("... cache stale or nonexistent, doing a costly parse ...\n");
 
-	// Hefty stack IO buffer, rededicate to reading after writes done
-	enum {WB = 8*1024, RB = 32*1024};
-	char buf[WB+RB];
-	SetWrite(scratchfid, buf, WB);
-	SetRead(rezfid, buf+WB, RB);
-	wbufat = wbufseek = offset + 256;
+			Walk9(DIRFID, RESFORKFID, 0, NULL, NULL, NULL);
+			if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, tmpname, NULL, NULL))
+				panic("failed create new res cache");
+			if (Lopen9(REZFID, O_RDONLY, NULL, NULL))
+				panic("failed open extant sidecar");
 
-	// Slurp the Rez file sequentially, acquiring:
-	// type/id/attrib/bodyoffset/nameoffset into resources array
-	// name into namelist
-	// actual data into scratch file
-	for (;;) {
-		struct res r;
-		uint8_t attrib;
-		bool hasname;
-		unsigned char name[256];
+			uint32_t size = Rez(REZFID, RESFORKFID);
+			Clunk9(REZFID);
+			Clunk9(RESFORKFID);
 
-		if (RezHeader(&attrib, &r.type, &r.id, &hasname, name)) break;
+			if (Walk9(DIRFID, RESFORKFID, 1, (const char *[]){tmpname}, NULL, NULL))
+				panic("failed walk new tmp res cache");
+			if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, sidecarStat))
+				panic("failed setmtime res cache");
+			Clunk9(RESFORKFID);
 
-		int32_t rezoffset = rbufseek;
+			if (Renameat9(DIRFID, tmpname, DIRFID, cachename))
+				panic("failed rename res cache");
 
-		int32_t bodylen;
-		int64_t fixup = wbufseek;
-		for (int i=0; i<4; i++) Write(0);
-		bodylen = RezBody();
-		err = Overwrite(&bodylen, fixup, 4);
-		if (err) return 0;
-		if (bodylen < 0) panic("failed to read Rez body");
-
-		if (nres >= sizeof resources/sizeof *resources) {
-			panic("too many resources in file");
-		}
-
-		// append the name to the packed name list
-		if (hasname) {
-			if (namesize + 1 + name[0] > 0x10000)
-				panic("filled name buffer");
-			r.nameoff = namesize;
-			memcpy(namelist + namesize, name, 1 + name[0]);
-			namesize += 1 + name[0];
+			stat->size = size;
+			stat->mtime_sec = sidecarStat.mtime_sec;
+			stat->mtime_nsec = sidecarStat.mtime_nsec;
 		} else {
-			r.nameoff = 0xffff;
-		}
+// 			printf("... cache is already in date, doing nothing\n");
 
-		r.attrandoff = contentsize | ((uint32_t)attrib << 24);
-
-		resources[nres++] = r;
-		contentsize += 4 + bodylen;
-	}
-
-	// We will no longer use the read buffer, rededicate it to write buffer
-	wbufsize = WB + RB;
-
-	// Group resources of the same type together and count unique types
-	qsort(resources, nres, sizeof *resources, resorder);
-	int ntype = 0;
-	for (int i=0; i<nres; i++) {
-		if (i==0 || resources[i-1].type!=resources[i].type) ntype++;
-	}
-
-	// Resource map header
-	for (int i=0; i<25; i++) Write(0);
-	Write(28); // offset to type list
-	Write((28 + 2 + 8*ntype + 12*nres) >> 8); // offset to name
-	Write((28 + 2 + 8*ntype + 12*nres) >> 0);
-	Write((ntype - 1) >> 8); // resource types in the map minus 1
-	Write((ntype - 1) >> 0);
-
-	// Resource type list
-	int base = 2 + 8*ntype;
-	int ott = 0;
-	for (int i=0; i<nres; i++) {
-		if (i==nres-1 || resources[i].type!=resources[i+1].type) {
-			// last resource of this type
-			Write(resources[i].type >> 24);
-			Write(resources[i].type >> 16);
-			Write(resources[i].type >> 8);
-			Write(resources[i].type >> 0);
-			Write(ott >> 8);
-			Write(ott >> 0);
-			Write(base >> 8);
-			Write(base >> 0);
-			base += 12 * (ott + 1);
-			ott = 0;
-		} else {
-			ott++;
-		}
-	}
-
-	// Resource reference list
-	for (int i=0; i<nres; i++) {
-		Write(resources[i].id >> 8);
-		Write(resources[i].id >> 0);
-		Write(resources[i].nameoff >> 8);
-		Write(resources[i].nameoff >> 0);
-		Write(resources[i].attrandoff >> 24);
-		Write(resources[i].attrandoff >> 16);
-		Write(resources[i].attrandoff >> 8);
-		Write(resources[i].attrandoff >> 0);
-		for (int i=0; i<4; i++) Write(0);
-	}
-
-	for (int i=0; i<namesize; i++) {
-		Write(namelist[i]);
-	}
-
-	Flush();
-
-	uint32_t head[4] = {
-		256,
-		256+contentsize,
-		contentsize,
-		28+2+8*ntype+12*nres+namesize
-	};
-
-	Write9(scratchfid, head, offset, sizeof head, NULL);
-
-	return 256+contentsize+28+2+8*ntype+12*nres+namesize;
-}
-
-#define READ16BE(S) ((255 & (S)[0]) << 8 | (255 & (S)[1]))
-#define READ24BE(S) \
-  ((uint32_t)(255 & (S)[0]) << 16 | \
-   (uint32_t)(255 & (S)[1]) << 8 | \
-   (uint32_t)(255 & (S)[2]))
-
-static void writeout(uint32_t scratchfid, uint64_t offset, uint32_t rezfid) {
-	char rbuf[8*1024], wbuf[32*1024];
-
-	uint32_t head[4];
-	Read9(scratchfid, head, offset, sizeof head, NULL);
-	char map[64*1024];
-	Read9(scratchfid, map, offset + head[1], head[3], NULL);
-
-	char *tl = map + READ16BE(map+24);
-	char *nl = map + READ16BE(map+26);
-
-	int nt = (uint16_t)(READ16BE(tl) + 1);
-
-	SetRead(scratchfid, rbuf, sizeof rbuf);
-	SetWrite(rezfid, wbuf, sizeof wbuf);
-
-	for (int i=0; i<nt; i++) {
-		char *t = tl + 2 + 8*i;
-		int nr = READ16BE(t+4) + 1;
-		int r1 = READ16BE(t+6);
-		for (int j=0; j<nr; j++) {
-			char *r = tl + r1 + 12*j;
-
-			int16_t id = READ16BE(r);
-			uint16_t nameoff = READ16BE(r+2);
-			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
-			uint8_t attr = *(r+4);
-			uint32_t contoff = READ24BE(r+5);
-
-			DerezHeader(attr, t, id, name);
-
-			rbufseek = offset + head[0] + contoff;
-			uint32_t len = 0;
-			for (int i=0; i<4; i++) {
-				len = (len << 8) | (uint8_t)Read();
-			}
-			DerezBody(len);
-			Write('}');
-			Write(';');
-			Write('\n');
-			Write('\n');
-		}
-	}
-
-	Flush();
-}
-
-static int resorder(const void *a, const void *b) {
-	const struct res *aa = a, *bb = b;
-
-	if (aa->type > bb->type) {
-		return 1;
-	} else if (aa->type == bb->type) {
-		if (aa->id > bb->id) {
-			return 1;
-		} else {
-			return -1;
+			stat->size = cacheStat.size;
+			stat->mtime_sec = cacheStat.mtime_sec;
+			stat->mtime_nsec = cacheStat.mtime_nsec;
 		}
 	} else {
-		return -1;
+		// sidecar nonexistent: make an empty resfork cache file,
+		// but make its mtime far in the past, not to pollute the overall file's mtime
+		Walk9(DIRFID, RESFORKFID, 0, NULL, NULL, NULL);
+		if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, cachename, NULL, NULL))
+			panic("failed create empty res cache");
+		if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, (struct Stat9){.mtime_sec=0, .mtime_nsec=0}))
+			panic("failed setmtime empty res cache");
+		Clunk9(RESFORKFID);
 	}
 }
 
-// Attempt to create a single large unlinked tempfile
-// (Use exponential backoff: VM lacks entropy to randomize the filename)
-static int tempfile(void) {
-	const char name[] = ".9temp";
-	int err;
+static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid) {
+	struct Stat9 stat;
+	statResourceFork(cnid, mainfid, name, &stat);
 
-	Walk9(ROOTFID, FIDBIG, 0, NULL, NULL, NULL);
+	char cachename[1024];
+	sprintf(cachename, "%08x", cnid);
+	if (Walk9(DIRFID, cachefid, 1, (const char *[]){cachename}, NULL, NULL))
+		panic("failed walk extant res cache");
+	if (Lopen9(cachefid, O_RDWR, NULL, NULL))
+		panic("failed open extant res cache");
+}
 
-	uint32_t sleep = 1;
-	for (;;) {
-		err = Lcreate9(FIDBIG, O_CREAT|O_EXCL|O_RDWR, 0600, 0, name, NULL, NULL);
-		if (err == 0) break;
-		else if (err != EEXIST) return err;
+static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
+	// not atomic, needs a rethink
+	if (OpenSidecar(REZFID, cnid, O_WRONLY|O_CREAT|O_TRUNC, "%s.rdump"))
+		panic("failed OpenSidecar for writeout");
 
-		uint32_t t0 = TickCount();
-		while (TickCount()-sleep < 2) {};
-		sleep *= 2;
+	struct Stat9 cachetime;
+	if (Getattr9(cachefid, STAT_MTIME, &cachetime))
+		panic("flushResourceFork getattr cachefid");
+
+	struct Stat9 sidecartime;
+	if (Getattr9(REZFID, STAT_MTIME, &sidecartime))
+		panic("flushResourceFork getattr REZFID");
+
+	if (cachetime.mtime_sec==sidecartime.mtime_sec && cachetime.mtime_nsec==sidecartime.mtime_nsec) {
+		Clunk9(REZFID);
+		return;
 	}
 
-	err = Unlinkat9(ROOTFID, name, 0);
-	if (err) panic("Failed to unlink our temp resource file");
+	DeRez(cachefid, REZFID);
 
-	return 0;
+	if (Setattr9(REZFID, SET_MTIME|SET_MTIME_SET, cachetime))
+		panic("flushResourceFork setattr");
+
+	Clunk9(REZFID);
 }
