@@ -49,6 +49,7 @@ struct openfile {
 };
 
 int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt); // borrowed from device-9p.c
+int DeleteSidecar(int32_t cnid, const char *fmt);
 
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
 static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid);
@@ -392,13 +393,19 @@ static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, u
 }
 
 static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
+	struct Stat9 cachetime;
+	if (Getattr9(cachefid, STAT_MTIME|STAT_SIZE, &cachetime))
+		panic("flushResourceFork getattr cachefid");
+
+	if (cachetime.size == 0) {
+		DeleteSidecar(cnid, "%s.rdump");
+		// problem: the file's mtime won't be updated
+		return;
+	}
+
 	// not atomic, needs a rethink
 	if (OpenSidecar(REZFID, cnid, O_WRONLY|O_CREAT|O_TRUNC, "%s.rdump"))
 		panic("failed OpenSidecar for writeout");
-
-	struct Stat9 cachetime;
-	if (Getattr9(cachefid, STAT_MTIME, &cachetime))
-		panic("flushResourceFork getattr cachefid");
 
 	struct Stat9 sidecartime;
 	if (Getattr9(REZFID, STAT_MTIME, &sidecartime))
@@ -408,6 +415,7 @@ static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
 		Clunk9(REZFID);
 		return;
 	}
+
 
 	DeRez(cachefid, REZFID);
 

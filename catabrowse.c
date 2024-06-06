@@ -30,8 +30,8 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 // Single statically allocated array of path components
 // UTF-8, null-terminated
 // (Final component can be edited safely)
-static char *pathComps[100];
-static int32_t expectCNID[100];
+static char *pathComps[MAXDEPTH];
+static int32_t expectCNID[MAXDEPTH];
 static int pathCompCnt;
 static char pathBlob[512];
 static int pathBlobSize;
@@ -40,8 +40,11 @@ static int pathBlobSize;
 struct Qid9 root;
 
 int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
-	if (paspath == NULL) paspath = "";
+	if (paspath == NULL) paspath = ""; // happens a lot
 
+	// Parsing MacOS:paths is tricky at the edges
+	// Supposedly, a path is absolute IFF it contains a colon and does not start with one
+	// But cnid==1 ("parent of root") also causes the path to be treated as absolute
 	if (isAbs(paspath) || cnid == 1 /*"parent of root"*/) {
 		// Path is "Macintosh HD:something"
 		// Or a special case: "Macintosh HD" or even ":Macintosh HD:something",
