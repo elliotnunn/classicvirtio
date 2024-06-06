@@ -18,10 +18,10 @@ static int Read(void);
 static bool ReadIf(char want);
 
 void SetWrite(uint32_t fid, void *buffer, uint32_t buflen);
-int WriteBuf(void *x, size_t n);
-static int Write(char x);
-int Overwrite(void *buf, uint64_t at, uint32_t cnt); // for resource forks specifically
-int Flush(void);
+void WriteBuf(void *x, size_t n);
+static void Write(char x);
+void Overwrite(void *buf, uint64_t at, uint32_t cnt); // for resource forks specifically
+void Flush(void);
 
 // Feel free to play with these globals
 extern char *rbuf;
@@ -63,14 +63,12 @@ static bool ReadIf(char want) {
 	}
 }
 
-static int Write(char x) {
+static void Write(char x) {
 	if (wbufcnt >= wbufsize) {
-		int err = Flush();
-		if (err) return err;
+		Flush();
 	}
 
 	wbuf[wbufcnt] = x;
 	wbufcnt++;
 	wbufseek++;
-	return 0;
 }
