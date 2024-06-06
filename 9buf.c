@@ -1,6 +1,8 @@
 /* Copyright (c) 2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
+#include "panic.h"
+
 #include "9buf.h"
 
 char *rbuf;
