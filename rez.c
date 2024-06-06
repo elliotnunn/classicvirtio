@@ -27,8 +27,6 @@ static long integer(void);
 static int resorder(const void *a, const void *b);
 
 uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
-	printf("Rez textfid=%d forkfid=%d\n", textfid, forkfid);
-
 	int err;
 	int nres = 0;
 	struct res resources[2727]; // see Guide to the File System Manager v1.2 pD-3
@@ -54,9 +52,8 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 		bool hasname;
 		unsigned char name[256];
 
-		int j = rezHeader(&attrib, &r.type, &r.id, &hasname, name);
-		printf("rezHeader returns %d\n", j);
-		if (j) break;
+		if (rezHeader(&attrib, &r.type, &r.id, &hasname, name) != 0)
+			break;
 
 		int32_t rezoffset = rbufseek;
 
