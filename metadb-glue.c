@@ -162,7 +162,7 @@ void localtime(void) {
 #include <string.h>
 
 enum {
-	BASEFID = 40000, // the directory where all db files are made
+	BASEFID = 1, // the directory where all db files are made
 	FIRSTFID = 50000, // first of 32 scratch fids
 	SCRATCHFID = 49999, // for playing around
 };
