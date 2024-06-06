@@ -71,10 +71,11 @@ enum {
 	// so if the dispatch mechanism changes, this constant must change:
 	FSID = ('9'<<8) | 'p',
 	ROOTFID = 0,
-	FID1 = 1,
-	FID2 = 2,
-	FID3 = 3,
-	FIDPERSIST = 4,
+	CACHEFID = 1,
+	FID1 = 2,
+	FID2 = 3,
+	FID3 = 4,
+	FIDPERSIST = 5,
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 256 * 1024, // large stack bc memory is so hard to allocate
@@ -290,7 +291,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Start up the database for catalog IDs and other purposes
 	int direrr = Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (direrr && direrr!=EEXIST) panic("could not make work directory");
-	direrr = Walk9(ROOTFID, 40000, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
+	direrr = Walk9(ROOTFID, CACHEFID, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
 	if (direrr) panic("bad walk");
 
 	startDB();
