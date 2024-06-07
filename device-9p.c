@@ -28,7 +28,7 @@ not used because it is unavailable at the start of the boot process.
 #include <Traps.h>
 
 #include "callin68k.h"
-#include "catabrowse.h"
+#include "catalog.h"
 #include "device.h"
 #include "fids.h"
 #include "metadb-glue.h"

@@ -11,7 +11,7 @@
 #include "sqlite3.h"
 #include "unicode.h"
 
-#include "catabrowse.h"
+#include "catalog.h"
 
 enum {
 	FIDBROWSE = FIRSTFID_CATALOG,
