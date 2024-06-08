@@ -60,7 +60,7 @@ static int init3(void) {
 	int err;
 
 	for (;;) { // essentially mkdir -p
-		err = Walk9(DOTDIRFID, DIRFID, 1, (const char *[]){"resforks"}, NULL, NULL);
+		err = WalkPath9(DOTDIRFID, DIRFID, "resforks");
 		if (!err) break;
 		if (err != ENOENT) panic("unexpected mkdir-walk err");
 		err = Mkdir9(1, 0777, 0, "resforks", NULL);
@@ -80,7 +80,7 @@ static int open3(void *opaque, short refnum, int32_t cnid, uint32_t fid, const c
 
 	if (!resfork) {
 		// Data fork is relatively simple: the file can only be opened if it exists
-		Walk9(fid, s->fid, 0, NULL, NULL, NULL);
+		WalkPath9(fid, s->fid, "");
 
 		if (write) {
 			err = Lopen9(s->fid, O_RDWR, NULL, NULL);
@@ -173,11 +173,10 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 	// Costly: read the Finder info
 	// Unanswered question: what is the difference between four-nulls and four-question-marks?
 	if (fields & MF_FINFO) {
-		char iname[1024];
-		strcpy(iname, name);
-		strcat(iname, ".idump");
+		char ipath[1024];
+		sprintf(ipath, "../%s.idump", name);
 
-		if (!Walk9(fid, FINFOFID, 2, (const char *[]){"..", iname}, NULL, NULL)
+		if (!WalkPath9(fid, FINFOFID, ipath)
 				&&
 				!Lopen9(FINFOFID, O_RDONLY, NULL, NULL)) {
 			Read9(FINFOFID, attr->finfo, 0, 8, NULL);
@@ -197,7 +196,7 @@ int fsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, con
 	}
 
 	if (fields & MF_FINFO) {
-		int err = Walk9(fid, FINFOFID, 1, (const char *[]){".."}, NULL, NULL);
+		int err = WalkPath9(fid, FINFOFID, "..");
 		if (err) panic("dot-dot should never fail");
 
 		char iname[1024];
@@ -245,7 +244,7 @@ static int move3(uint32_t fid1, const char *name1, uint32_t fid2, const char *na
 }
 
 static int del3(uint32_t fid, const char *name, bool isdir) {
-	Walk9(fid, TMPFID, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(fid, TMPFID, "..");
 
 	if (isdir) {
 		return Unlinkat9(TMPFID, name, 0x200 /*AT_REMOVEDIR*/);
@@ -305,9 +304,9 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	struct Stat9 sidecarStat, cacheStat;
 
 	// Navigate to the sidecar file (.rdump), check for existence, get mtime (if applicable), don't open
-	char rname[1024];
-	sprintf(rname, "%s.rdump", name);
-	err = Walk9(mainfid, REZFID, 2, (const char *[]){"..", rname}, NULL, NULL);
+	char rpath[1024];
+	sprintf(rpath, "../%s.rdump", name);
+	err = WalkPath9(mainfid, REZFID, rpath);
 	if (!err) {
 		if (Getattr9(REZFID, STAT_MTIME|STAT_SIZE, &sidecarStat))
 			panic("failed stat sidecar");
@@ -317,7 +316,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	// Navigate to the hidden cache file, check for existence, get mtime (if applicable), don't open
 	char cachename[12]; // enough room to append .tmp also
 	sprintf(cachename, "%08x", cnid);
-	if (!Walk9(DIRFID, RESFORKFID, 1, (const char *[]){cachename}, NULL, NULL)) {
+	if (!WalkPath9(DIRFID, RESFORKFID, cachename)) {
 		if (Getattr9(RESFORKFID, STAT_MTIME|STAT_SIZE, &cacheStat))
 			panic("failed stat extant res cache");
 		cacheExists = true;
@@ -339,7 +338,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 		) {
 // 			printf("... cache stale or nonexistent, doing a costly parse ...\n");
 
-			Walk9(DIRFID, RESFORKFID, 0, NULL, NULL, NULL);
+			WalkPath9(DIRFID, RESFORKFID, "");
 			if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, tmpname, NULL, NULL))
 				panic("failed create new res cache");
 			if (Lopen9(REZFID, O_RDONLY, NULL, NULL))
@@ -349,7 +348,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 			Clunk9(REZFID);
 			Clunk9(RESFORKFID);
 
-			if (Walk9(DIRFID, RESFORKFID, 1, (const char *[]){tmpname}, NULL, NULL))
+			if (WalkPath9(DIRFID, RESFORKFID, tmpname))
 				panic("failed walk new tmp res cache");
 			if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, sidecarStat))
 				panic("failed setmtime res cache");
@@ -371,7 +370,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	} else {
 		// sidecar nonexistent: make an empty resfork cache file,
 		// but make its mtime far in the past, not to pollute the overall file's mtime
-		Walk9(DIRFID, RESFORKFID, 0, NULL, NULL, NULL);
+		WalkPath9(DIRFID, RESFORKFID, "");
 		if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, cachename, NULL, NULL))
 			panic("failed create empty res cache");
 		if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, (struct Stat9){.mtime_sec=0, .mtime_nsec=0}))
@@ -386,7 +385,7 @@ static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, u
 
 	char cachename[1024];
 	sprintf(cachename, "%08x", cnid);
-	if (Walk9(DIRFID, cachefid, 1, (const char *[]){cachename}, NULL, NULL))
+	if (WalkPath9(DIRFID, cachefid, cachename))
 		panic("failed walk extant res cache");
 	if (Lopen9(cachefid, O_RDWR, NULL, NULL))
 		panic("failed open extant res cache");

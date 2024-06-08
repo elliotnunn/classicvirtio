@@ -283,7 +283,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Start up the database for catalog IDs and other purposes
 	int direrr = Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (direrr && direrr!=EEXIST) panic("could not make work directory");
-	direrr = Walk9(ROOTFID, DOTDIRFID, 1, (const char *[]){".classicvirtio.nosync.noindex"}, NULL, NULL);
+	direrr = WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex");
 	if (direrr) panic("bad walk");
 
 	startDB();
@@ -751,7 +751,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	char childname[512];
 	char scratch[4096];
 
-	Walk9(fid, FID1, 0, NULL, NULL, NULL);
+	WalkPath9(fid, FID1, "");
 	Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL);
 	InitReaddir9(FID1, scratch, sizeof scratch);
 	while (Readdir9(scratch, NULL, NULL, childname) == 0 && valence < 0x7fff) {
@@ -1322,7 +1322,7 @@ static OSErr fsRename(struct IOParam *pb) {
 	if (!iserr(browse(JUNK, parentCNID, newNameR))) return dupFNErr;
 
 	// Need a PARENT for the Trenameat call
-	Walk9(CHILD, PARENT, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(CHILD, PARENT, "..");
 
 	int lerr = MF.Move(PARENT, oldNameU, PARENT, newNameU);
 	if (lerr) return ioErr;
@@ -1362,7 +1362,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 	if (!iserr(browse(FID3, cnid2, romanname))) return dupFNErr; // FID3 is junk
 
 	// Navigate "up" a level because 9P expects the parent fid
-	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(FID1, FID1, "..");
 
 	int lerr = MF.Move(FID1, getDBName(cnid1), FID2, getDBName(cnid1));
 	if (lerr == EINVAL) badMovErr;
@@ -1429,13 +1429,13 @@ int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt) {
 	err = browse(fid, cnid, "");
 	if (err < 0) return ENOENT;
 
-	Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(fid, fid, "..");
 
 	char sidename[1024]; // like file.rdump or ._file
 	sprintf(sidename, fmt, getDBName(cnid));
 
 	// Squalid raciness
-	err = Walk9(fid, fid, 1, (const char *[]){sidename}, NULL, NULL);
+	err = WalkPath9(fid, fid, sidename);
 	if (flags == 0) return err;
 
 	if (err) goto trycreate;
@@ -1455,7 +1455,7 @@ int DeleteSidecar(int32_t cnid, const char *fmt) {
 	err = browse(FID1, cnid, "");
 	if (err < 0) return ENOENT;
 
-	Walk9(FID1, FID1, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(FID1, FID1, "..");
 
 	char sidename[1024]; // like file.rdump or ._file
 	sprintf(sidename, fmt, getDBName(cnid));

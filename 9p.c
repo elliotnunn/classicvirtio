@@ -178,6 +178,61 @@ int Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *nam
 	return 0;
 }
 
+// Panics if you exceed the maximum 16 components
+// Returns 0 if any components of the walk fail (for easy error checking)
+int WalkPath9(uint32_t fid, uint32_t newfid, const char *path) {
+	enum {Twalk = 110}; // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
+	enum {Rwalk = 111}; // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
+
+	if (newfid < 32 && fid != newfid && (openfids & (1<<newfid))) Clunk9(newfid);
+
+	const char *lookhere = path;
+	char packed[1024];
+	char *packhere = packed;
+	int components = 0;
+
+	for (;;) {
+		int len = 0;
+		while (lookhere[len]!=0 && lookhere[len]!='/') len++;
+
+		if (len > 0) {
+			if (packhere + 2 + len > packed + sizeof packed) {
+				panic("WalkPath9 too many characters");
+			}
+			if (components == 16) {
+				panic("WalkPath9 too many components");
+			}
+
+			packhere[0] = len;
+			packhere[1] = len >> 8;
+			memcpy(packhere+2, lookhere, len);
+			packhere += 2 + len;
+
+			components++;
+		}
+
+		if (lookhere[len] == 0) break;
+		lookhere += len + 1;
+	}
+
+	uint16_t ok = 0;
+	char qids[16*13];
+
+	int err = transact(Twalk, "ddwB", "wB",
+		fid, newfid, components, packed, packhere - packed,
+		&ok, qids, sizeof qids);
+
+	if (err && components==0) {
+		panic("Twalk with 0 components should never fail");
+	}
+
+	if (err) return err;
+	if (ok != components) return ENOENT;
+
+	if (newfid < 32) openfids |= 1<<newfid;
+	return 0;
+}
+
 int Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit) {
 	enum {Tlopen = 12}; // size[4] Tlopen tag[2] fid[4] flags[4]
 	enum {Rlopen = 13}; // size[4] Rlopen tag[2] qid[13] iounit[4]

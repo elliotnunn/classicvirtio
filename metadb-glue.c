@@ -396,12 +396,12 @@ static int demoOpen(
 
 	int err = 1;
 
-	Walk9(DOTDIRFID, fid, 0, NULL, NULL, NULL);
+	WalkPath9(DOTDIRFID, fid, "");
 
 	if (flags&SQLITE_OPEN_CREATE) {
 		if (Lcreate9(fid, oflags, 0666, 0, zName, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
 	} else {
-		if (Walk9(fid, fid, 1, (const char *[]){zName}, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
+		if (WalkPath9(fid, fid, zName)) dbgprintreturn(SQLITE_CANTOPEN);
 		if (Lopen9(fid, oflags, NULL, NULL)) dbgprintreturn(SQLITE_CANTOPEN);
 	}
 
@@ -452,7 +452,7 @@ static int demoAccess(
   int *pResOut
 ){
 	dbgprintf("**** %s %s flags=%#x\n", __func__, zPath, flags);
-	int err9 = Walk9(DOTDIRFID, SCRATCHFID, 1, (const char *[]){zPath}, NULL, NULL);
+	int err9 = WalkPath9(DOTDIRFID, SCRATCHFID, zPath);
 
 	if (err9) {
 		*pResOut = 0;

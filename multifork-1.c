@@ -49,7 +49,7 @@ static void flushrf(void) {
 
 	int err;
 
-	err = Walk9(enorm->fid, FID1, 0, NULL, NULL, NULL);
+	err = WalkPath9(enorm->fid, FID1, "");
 	if (err) panic("mf1, saved RF fid bad");
 
 	err = Xattrcreate9(FID1, "com.apple.ResourceFork", enorm->size, 0 /*don't mind create/replace*/);
@@ -101,7 +101,7 @@ static int open1(void *opaque, short refnum, int32_t cnid, uint32_t fid, const c
 
 	if (!resfork) {
 		// Data fork is easy case, access directly
-		Walk9(fid, newfid, 0, NULL, NULL, NULL);
+		WalkPath9(fid, newfid, "");
 		if (write) {
 			err = Lopen9(newfid, O_RDWR, NULL, NULL);
 			if (err == 0) return 0;
@@ -110,7 +110,7 @@ static int open1(void *opaque, short refnum, int32_t cnid, uint32_t fid, const c
 		err = Lopen9(newfid, O_RDONLY, NULL, NULL);
 		return err;
 	} else {
-		Walk9(fid, newfid, 0, NULL, NULL, NULL);
+		WalkPath9(fid, newfid, "");
 		// Defer reading the resource fork until the actual read call
 		// Resource fork is trickier
 		return 0;
@@ -252,7 +252,7 @@ int fsetattr1(int32_t cnid, uint32_t fid, const char *name, unsigned fields, con
 
 	if (fields & MF_FINFO) {
 		int Xattrcreate9(uint32_t fid, const char *name, uint64_t size, uint32_t flags);
-		Walk9(fid, FID1, 0, NULL, NULL, NULL);
+		WalkPath9(fid, FID1, "");
 
 		int err = Xattrcreate9(FID1, "com.apple.FinderInfo", 32, 0 /*flags*/);
 		if (err) return err;
@@ -284,7 +284,7 @@ static int move1(uint32_t fid1, const char *name1, uint32_t fid2, const char *na
 }
 
 static int del1(uint32_t fid, const char *name, bool isdir) {
-	Walk9(fid, FID1, 1, (const char *[]){".."}, NULL, NULL);
+	WalkPath9(fid, FID1, "..");
 
 	if (isdir) {
 		return Unlinkat9(FID1, name, 0x200 /*AT_REMOVEDIR*/);

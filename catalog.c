@@ -70,7 +70,7 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 
 	// Fast case: root only
 	if (pathCompCnt == 0) {
-		Walk9(ROOTFID, fid, 0, NULL, NULL, NULL); // dupe shouldn't fail
+		WalkPath9(ROOTFID, fid, ""); // dupe shouldn't fail
 		return 2;
 	}
 
@@ -146,7 +146,7 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 
 			// Exhaustive directory listing
 			char scratch[4096];
-			Walk9(tip, FIDBROWSE, 0, NULL, NULL, NULL); // dupe shouldn't fail
+			WalkPath9(tip, FIDBROWSE, ""); // dupe shouldn't fail
 			if (Lopen9(FIDBROWSE, O_RDONLY|O_DIRECTORY, NULL, NULL)) return fnfErr;
 			InitReaddir9(FIDBROWSE, scratch, sizeof scratch);
 
@@ -171,7 +171,7 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 
 			if (err != 0) return fnfErr;
 
-			if (Walk9(tip, fid, 1, (const char *[]){filename}, NULL, NULL))
+			if (WalkPath9(tip, fid, filename))
 				return fnfErr;
 			tip = fid;
 
