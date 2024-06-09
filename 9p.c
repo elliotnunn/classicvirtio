@@ -329,7 +329,7 @@ void InitReaddir9(uint32_t fid, void *buf, size_t bufsize) {
 }
 
 // 0 = ok, negative = eof, positive = linux errno
-int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[512]) {
+int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[MAXNAME]) {
 	enum {Treaddir = 40}; // size[4] Treaddir tag[2] fid[4] offset[8] count[4]
 	enum {Rreaddir = 41}; // size[4] Rreaddir tag[2] count[4] data[count]
 	                      // "data" = qid[13] offset[8] type[1] name[s]

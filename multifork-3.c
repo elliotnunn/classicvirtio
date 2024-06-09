@@ -173,7 +173,7 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 	// Costly: read the Finder info
 	// Unanswered question: what is the difference between four-nulls and four-question-marks?
 	if (fields & MF_FINFO) {
-		char ipath[1024];
+		char ipath[MAXNAME];
 		sprintf(ipath, "../%s.idump", name);
 
 		if (!WalkPath9(fid, FINFOFID, ipath)
@@ -199,7 +199,7 @@ int fsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, con
 		int err = WalkPath9(fid, FINFOFID, "..");
 		if (err) panic("dot-dot should never fail");
 
-		char iname[1024];
+		char iname[MAXNAME];
 		strcpy(iname, name);
 		strcat(iname, ".idump");
 		err = Lcreate9(FINFOFID, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL);
@@ -233,7 +233,7 @@ static int move3(uint32_t fid1, const char *name1, uint32_t fid2, const char *na
 
 	const char *sidecars[] = {"%s.rdump", "%s.idump"};
 	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
-		char sidename1[1024], sidename2[1024];
+		char sidename1[MAXNAME], sidename2[MAXNAME];
 		sprintf(sidename1, sidecars[i], name1);
 		sprintf(sidename2, sidecars[i], name2);
 		err = Renameat9(fid1, sidename1, fid2, sidename2);
@@ -253,7 +253,7 @@ static int del3(uint32_t fid, const char *name, bool isdir) {
 		// then delete the sidecars on a best-effort basis
 		const char *sidecars[] = {"%s", "%s.rdump", "%s.idump"};
 		for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
-			char delname[1024];
+			char delname[MAXNAME];
 			sprintf(delname, sidecars[i], name);
 			int err = Unlinkat9(TMPFID, delname, 0);
 			if (err && i==0) return err;
@@ -304,7 +304,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	struct Stat9 sidecarStat, cacheStat;
 
 	// Navigate to the sidecar file (.rdump), check for existence, get mtime (if applicable), don't open
-	char rpath[1024];
+	char rpath[MAXNAME];
 	sprintf(rpath, "../%s.rdump", name);
 	err = WalkPath9(mainfid, REZFID, rpath);
 	if (!err) {
@@ -383,7 +383,7 @@ static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, u
 	struct Stat9 stat;
 	statResourceFork(cnid, mainfid, name, &stat);
 
-	char cachename[1024];
+	char cachename[MAXNAME];
 	sprintf(cachename, "%08x", cnid);
 	if (WalkPath9(DIRFID, cachefid, cachename))
 		panic("failed walk extant res cache");

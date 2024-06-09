@@ -181,6 +181,7 @@ enum {
 
 enum {
 	NOFID = -1,
+	MAXNAME = 128, // including the null terminator
 };
 
 extern uint32_t Max9;
@@ -236,7 +237,7 @@ int Unlinkat9(uint32_t fid, const char *name, uint32_t flags);
 int Renameat9(uint32_t olddirfid, const char *oldname, uint32_t newdirfid, const char *newname);
 int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid);
 void InitReaddir9(uint32_t fid, void *buf, size_t bufsize);
-int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[512]);
+int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[MAXNAME]);
 int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret);
 int Setattr9(uint32_t fid, uint32_t request_mask, struct Stat9 to);
 int Clunk9(uint32_t fid);

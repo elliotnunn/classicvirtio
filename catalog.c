@@ -35,7 +35,7 @@ static int32_t expectCNID[MAXDEPTH];
 static int pathCompCnt;
 static char pathBlob[512];
 static int pathBlobSize;
-static char rootName[64];
+static char rootName[MAXNAME];
 
 // used in device-9p.c
 struct Qid9 root;
@@ -165,7 +165,7 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 			int err;
 			struct Qid9 qid;
 			char type;
-			char filename[512];
+			char filename[MAXNAME];
 			while ((err=Readdir9(scratch, &qid, &type, filename)) == 0) {
 				qid = qidTypeFix(qid, type);
 
@@ -379,7 +379,7 @@ const char *getDBName(int32_t cnid) {
 	if (cnid == 2) return rootName;
 
 	int32_t pcnid;
-	static char ret[1024];
+	static char ret[MAXNAME];
 
 	getDBBoth(cnid, &pcnid, ret);
 
@@ -432,7 +432,7 @@ static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
 
 	if (retname != NULL) {
 		uint32_t readlen = 0;
-		Read9(TMPFID, retname, 9, 1024, &readlen);
+		Read9(TMPFID, retname, 9, MAXNAME-1, &readlen);
 		if (readlen == 0)
 			panic("failed read catalog ent parent");
 		retname[readlen] = 0;

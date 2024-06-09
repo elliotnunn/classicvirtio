@@ -273,7 +273,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)
 	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
 	if (nameLen > 127) nameLen = 127;
-	char name[128] = {};
+	char name[MAXNAME] = {};
 	memcpy(name, VConfig+2, nameLen); // guarantee null term
 
 	char *formathint = "";
@@ -597,7 +597,7 @@ static OSErr fsGetVolInfo(struct XVolumeParam *pb) {
 	InitReaddir9(FID1, scratch, sizeof scratch);
 
 	char type;
-	char childname[512];
+	char childname[MAXNAME];
 	while (Readdir9(scratch, NULL, &type, childname) == 0) {
 		if (visName(childname) && type != 4 /*not folder*/) pb->ioVNmFls++;
 	}
@@ -667,7 +667,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			lastCNID = cnid;
 		}
 
-		char name[512];
+		char name[MAXNAME];
 		struct Qid9 qid;
 
 		// Fast-forward
@@ -729,7 +729,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	// 9P/Unix lack a call to count the contents of a directory, so list it
 	int valence=0;
-	char childname[512];
+	char childname[MAXNAME];
 	char scratch[4096];
 
 	WalkPath9(fid, FID1, "");
@@ -1222,7 +1222,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 
 	if (iserr(parentCNID)) return dirNFErr;
 
-	char uniname[1024];
+	char uniname[MAXNAME];
 	int n=0;
 	for (int i=0; i<name[0]; i++) {
 		long bytes = utf8char(name[i+1]);
@@ -1279,8 +1279,8 @@ static OSErr fsRename(struct IOParam *pb) {
 	if (iserr(childCNID)) return childCNID;
 	parentCNID = getDBParent(childCNID);
 
-	char oldNameU[512], newNameU[512];
-	unsigned char newNameR[256];
+	char oldNameU[MAXNAME], newNameU[MAXNAME];
+	unsigned char newNameR[MAXNAME];
 
 	// The old name is already in Unicode, and correct thanks to browse()
 	strcpy(oldNameU, getDBName(childCNID));
@@ -1412,7 +1412,7 @@ int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt) {
 
 	WalkPath9(fid, fid, "..");
 
-	char sidename[1024]; // like file.rdump or ._file
+	char sidename[MAXNAME]; // like file.rdump or ._file
 	sprintf(sidename, fmt, getDBName(cnid));
 
 	// Squalid raciness
@@ -1438,7 +1438,7 @@ int DeleteSidecar(int32_t cnid, const char *fmt) {
 
 	WalkPath9(FID1, FID1, "..");
 
-	char sidename[1024]; // like file.rdump or ._file
+	char sidename[MAXNAME]; // like file.rdump or ._file
 	sprintf(sidename, fmt, getDBName(cnid));
 
 	Unlinkat9(FID1, sidename, 0);
