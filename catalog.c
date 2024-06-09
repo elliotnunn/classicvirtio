@@ -27,7 +27,6 @@ static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsign
 static bool isAbs(const unsigned char *path);
 static int32_t qid2cnid(struct Qid9 qid);
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
-static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -366,7 +365,7 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 	return qid;
 }
 
-static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
+void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "INSERT OR REPLACE INTO catalog (id, parentid, name) VALUES (?, ?, ?);");
 
 	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
@@ -398,7 +397,7 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 }
 
 // NULL on failure (bad CNID)
-static const char *getDBName(int32_t cnid) {
+const char *getDBName(int32_t cnid) {
 	static char ret[512];
 
 	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
@@ -418,7 +417,7 @@ static const char *getDBName(int32_t cnid) {
 }
 
 // Zero on failure (bad CNID)
-static int32_t getDBParent(int32_t cnid) {
+int32_t getDBParent(int32_t cnid) {
 	int32_t ret;
 
 	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
