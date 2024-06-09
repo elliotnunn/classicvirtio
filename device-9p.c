@@ -275,10 +275,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 
 	// Start up the database for catalog IDs and other purposes
-	int direrr = Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
-	if (direrr && direrr!=EEXIST) panic("could not make work directory");
-	direrr = WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex");
-	if (direrr) panic("bad walk");
+	Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
+	if (WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex"))
+		anic("failed walk dotdir");
 
 	CatalogInit();
 
