@@ -103,9 +103,6 @@ static struct VCB *findVol(short num);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static bool visName(const char *name);
 static void startDB(void);
-static void setDB(int32_t cnid, int32_t pcnid, const char *name);
-static const char *getDBName(int32_t cnid);
-static int32_t getDBParent(int32_t cnid);
 int32_t mactime(int64_t unixtime);
 static long fsCall(void *pb, long selector);
 static OSErr fsDispatch(void *pb, unsigned short selector);
@@ -1624,59 +1621,6 @@ static void startDB(void) {
 	sqerr = sqlite3_exec(metadb, "CREATE TABLE IF NOT EXISTS catalog (id INTEGER PRIMARY KEY, parentid INTEGER, name BLOB);", NULL, NULL, &msg);
 	printf("err=%s\n", msg);
 	if (sqerr != SQLITE_OK) panic("sqlite3_exec");
-}
-
-static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "INSERT OR REPLACE INTO catalog (id, parentid, name) VALUES (?, ?, ?);");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-	if (sqlite3_bind_int(S, 2, pcnid)) panic("bind2");
-	if (sqlite3_bind_text(S, 3, name, -1, NULL)) panic("bind3");
-
-	if (sqlite3_step(S) != SQLITE_DONE) panic("step");
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-}
-
-// NULL on failure (bad CNID)
-static const char *getDBName(int32_t cnid) {
-	static char ret[512];
-
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		strcpy(ret, sqlite3_column_text(S, 0));
-	} else {
-		ret[0] = 0;
-	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	return ret;
-}
-
-// Zero on failure (bad CNID)
-static int32_t getDBParent(int32_t cnid) {
-	int32_t ret;
-
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		ret = sqlite3_column_int(S, 0);
-	} else {
-		ret = 0;
-	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	return ret;
 }
 
 int32_t mactime(int64_t unixtime) {

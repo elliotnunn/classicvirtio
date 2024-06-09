@@ -396,3 +396,43 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 	if (Renameat9(CATALOGFID, tmpname, CATALOGFID, permname))
 		panic("failed rename catalog ent");
 }
+
+// NULL on failure (bad CNID)
+static const char *getDBName(int32_t cnid) {
+	static char ret[512];
+
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
+
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+
+	if (sqlite3_step(S) == SQLITE_ROW) {
+		strcpy(ret, sqlite3_column_text(S, 0));
+	} else {
+		ret[0] = 0;
+	}
+
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
+
+	return ret;
+}
+
+// Zero on failure (bad CNID)
+static int32_t getDBParent(int32_t cnid) {
+	int32_t ret;
+
+	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
+
+	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+
+	if (sqlite3_step(S) == SQLITE_ROW) {
+		ret = sqlite3_column_int(S, 0);
+	} else {
+		ret = 0;
+	}
+
+	sqlite3_reset(S);
+	sqlite3_clear_bindings(S);
+
+	return ret;
+}
