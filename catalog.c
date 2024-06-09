@@ -16,6 +16,7 @@
 enum {
 	FIDBROWSE = FIRSTFID_CATALOG,
 	CATALOGFID,
+	TMPFID,
 };
 
 #define MAXDEPTH 16
@@ -376,4 +377,22 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 
 	sqlite3_reset(S);
 	sqlite3_clear_bindings(S);
+
+	char tmpname[8+4+1], permname[8+1];
+	sprintf(tmpname, "%08x.tmp", cnid);
+	sprintf(permname, "%08x", cnid);
+	WalkPath9(CATALOGFID, TMPFID, "");
+	if (Lcreate9(TMPFID, O_WRONLY|O_TRUNC, 0666, 0, tmpname, NULL, NULL))
+		panic("failed create catalog ent");
+
+	char parenthex[10];
+	sprintf(parenthex, "%08x ", pcnid);
+	if(Write9(TMPFID, parenthex, 0, 9, NULL))
+		panic("failed write catalog ent parent");
+	if(Write9(TMPFID, name, 9, strlen(name), NULL))
+		panic("failed write catalog ent");
+	Clunk9(TMPFID);
+
+	if (Renameat9(CATALOGFID, tmpname, CATALOGFID, permname))
+		panic("failed rename catalog ent");
 }
