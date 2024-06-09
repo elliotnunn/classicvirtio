@@ -420,7 +420,6 @@ static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
 			*retpcnid |= hex[i] - 'A' + 10;
 		}
 	}
-	printf("   pcnid = %#x\n", *retpcnid);
 
 	if (retname != NULL) {
 		uint32_t readlen = 0;
@@ -428,7 +427,6 @@ static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
 		if (readlen == 0)
 			panic("failed read catalog ent parent");
 		retname[readlen] = 0;
-		printf("   ownname = %s\n", retname);
 	}
 
 	Clunk9(TMPFID);
