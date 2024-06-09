@@ -267,8 +267,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Start up the database for catalog IDs and other purposes
 	Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex"))
-
-	CatalogInit();
 		panic("failed walk dotdir");
 
 	// Read mount_tag from config space into a C string
@@ -287,7 +285,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	printf("Volume name: %s\n", name);
 	mr27name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
-	setDB(2, 1, name);
+	CatalogInit(name);
 
 	// Need unique stable creation date, used pervasively as an ID, from inode#
 	vcb.vcbCrDate = 0x80000000 ^

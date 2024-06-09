@@ -35,17 +35,20 @@ static int32_t expectCNID[MAXDEPTH];
 static int pathCompCnt;
 static char pathBlob[512];
 static int pathBlobSize;
+static char rootName[64];
 
 // used in device-9p.c
 struct Qid9 root;
 
-void CatalogInit(void) {
+void CatalogInit(const char *name) {
 	int err = Mkdir9(DOTDIRFID, 0777, 0, "catalog", NULL);
 	if (err && err!=EEXIST)
 		panic("failed create /catalog");
 
 	if (WalkPath9(DOTDIRFID, CATALOGFID, "catalog"))
 		panic("failed walk /catalog");
+
+	strcpy(rootName, name);
 }
 
 int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
@@ -350,6 +353,8 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 }
 
 void setDB(int32_t cnid, int32_t pcnid, const char *name) {
+	if (cnid == 2) return;
+
 	char tmpname[8+4+1], permname[8+1];
 	sprintf(tmpname, "%08x.tmp", cnid);
 	sprintf(permname, "%08x", cnid);
@@ -371,6 +376,8 @@ void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 
 // NULL on failure (bad CNID)
 const char *getDBName(int32_t cnid) {
+	if (cnid == 2) return rootName;
+
 	int32_t pcnid;
 	static char ret[1024];
 
@@ -385,6 +392,8 @@ const char *getDBName(int32_t cnid) {
 
 // Zero on failure (bad CNID)
 int32_t getDBParent(int32_t cnid) {
+	if (cnid == 2) return 1;
+
 	int32_t pcnid;
 
 	getDBBoth(cnid, &pcnid, NULL);
