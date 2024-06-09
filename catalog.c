@@ -27,6 +27,7 @@ static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsign
 static bool isAbs(const unsigned char *path);
 static int32_t qid2cnid(struct Qid9 qid);
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
+static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname);
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -383,40 +384,69 @@ void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 
 // NULL on failure (bad CNID)
 const char *getDBName(int32_t cnid) {
-	static char ret[512];
+// 	printf("getDBName %#x\n", cnid);
+	int32_t pcnid;
+	static char ret[1024];
 
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (name) FROM catalog WHERE id == ?;");
+	getDBBoth(cnid, &pcnid, ret);
 
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		strcpy(ret, sqlite3_column_text(S, 0));
+	if (pcnid == 0) {
+		return NULL;
 	} else {
-		ret[0] = 0;
+		return ret;
 	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	return ret;
 }
 
 // Zero on failure (bad CNID)
 int32_t getDBParent(int32_t cnid) {
-	int32_t ret;
+// 	printf("getDBParent %#x\n", cnid);
+	int32_t pcnid;
 
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "SELECT (parentid) FROM catalog WHERE id == ?;");
+	getDBBoth(cnid, &pcnid, NULL);
 
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+	return pcnid;
+}
 
-	if (sqlite3_step(S) == SQLITE_ROW) {
-		ret = sqlite3_column_int(S, 0);
-	} else {
-		ret = 0;
+static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
+	printf("getDBBoth %#x\n", cnid);
+
+	char hex[8];
+
+	char permname[8+1];
+	sprintf(permname, "%08x", cnid);
+	if (WalkPath9(CATALOGFID, TMPFID, permname)) {
+		*retpcnid = 0;
+		return;
 	}
 
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
+	if (Lopen9(TMPFID, O_RDONLY, NULL, NULL))
+		panic("failed open extent catalog ent");
 
-	return ret;
+	if (Read9(TMPFID, hex, 0, 8, NULL))
+		panic("failed read catalog ent hex");
+
+	*retpcnid = 0;
+	for (int i=0; i<8; i++) {
+		*retpcnid <<= 4;
+
+		if (hex[i] >= '0' && hex[i] <= '9') {
+			*retpcnid |= hex[i] - '0';
+		} else if (hex[i] >= 'a' && hex[i] <= 'f') {
+			*retpcnid |= hex[i] - 'a' + 10;
+		} else if (hex[i] >= 'A' && hex[i] <= 'F') {
+			*retpcnid |= hex[i] - 'A' + 10;
+		}
+	}
+	printf("   pcnid = %#x\n", *retpcnid);
+
+	if (retname != NULL) {
+		uint32_t readlen = 0;
+		Read9(TMPFID, retname, 9, 1024, &readlen);
+		if (readlen == 0)
+			panic("failed read catalog ent parent");
+		retname[readlen] = 0;
+		printf("   ownname = %s\n", retname);
+	}
+
+	Clunk9(TMPFID);
 }
