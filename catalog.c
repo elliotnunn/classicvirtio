@@ -51,7 +51,7 @@ void CatalogInit(const char *name) {
 	strcpy(rootName, name);
 }
 
-int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
+int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	if (paspath == NULL) paspath = ""; // happens a lot
 
 	// Parsing MacOS:paths is tricky at the edges

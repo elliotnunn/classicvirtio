@@ -297,7 +297,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	installDrive();
 
-	int32_t systemFolder = browse(FID1, 2 /*cnid*/, "\pSystem Folder");
+	int32_t systemFolder = CatalogWalk(FID1, 2 /*cnid*/, "\pSystem Folder");
 	vcb.vcbFndrInfo[0] = iserr(systemFolder) ? 0 : systemFolder;
 	printf("System Folder: %s\n", iserr(systemFolder) ? "absent" : "present");
 	if (!iserr(systemFolder)) {
@@ -464,7 +464,7 @@ static void lateBootHook(void) {
 // At this stage we are a drive, not a volume, so there is only block-level access
 // ... but we need to access a resource fork ... so do some funky stuff.
 static void getBootBlocks(void) {
-	int32_t cnid = browse(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem");
+	int32_t cnid = CatalogWalk(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem");
 	if (iserr(cnid)) return;
 
 	uint64_t opaque[3] = {};
@@ -585,7 +585,7 @@ static OSErr fsGetVolInfo(struct XVolumeParam *pb) {
 	// Count contained files
 	pb->ioVNmFls = 0;
 
-	int err = browse(FID1, cnid, "");
+	int err = CatalogWalk(FID1, cnid, "");
 	if (err < 0) return err;
 
 	if (Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
@@ -658,7 +658,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			if (iserr(browse(FIDPERSIST, cnid, ""))) return fnfErr;
+			if (iserr(CatalogWalk(FIDPERSIST, cnid, ""))) return fnfErr;
 			if (Lopen9(FIDPERSIST, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
 			InitReaddir9(FIDPERSIST, scratch, sizeof scratch);
 			lastCNID = cnid;
@@ -693,14 +693,14 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		setDB(childcnid, cnid, name);
 		cnid = childcnid;
 
-		browse(FID1, cnid, "");
+		CatalogWalk(FID1, cnid, "");
 	} else if (idx == 0) {
 		printf("Find by: directory+path\n");
-		cnid = browse(FID1, cnid, pb->ioNamePtr);
+		cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 	} else {
 		printf("Find by: directory only\n");
-		cnid = browse(FID1, cnid, "\p");
+		cnid = CatalogWalk(FID1, cnid, "\p");
 		if (iserr(cnid)) return cnid;
 	}
 
@@ -801,7 +801,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 // TODO set timestamps, the attributes byte (comes with AppleDouble etc)
 static OSErr fsSetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(FID1, cnid, pb->ioNamePtr);
+	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 
 	// TODO: mtime setting
@@ -826,7 +826,7 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 	if (pb->ioTrap & 0x200) {
 		// HSetVol: any directory is fair game,
 		// so check that the path exists and is really a directory
-		int32_t cnid = browse(FID1, pbDirID(pb), pb->ioNamePtr);
+		int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 		if (!isdir(cnid)) return dirNFErr;
 		Clunk9(FID1);
@@ -869,7 +869,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
 
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(FID1, cnid, pb->ioNamePtr);
+	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
 	if (!iserr(cnid)) {
 		// The target exists
 		if (cnid == 2) {
@@ -892,7 +892,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (leaf[0] == 0) return dirNFErr;
 
 	cnid = pbDirID(pb);
-	cnid = browse(FID1, cnid, path);
+	cnid = CatalogWalk(FID1, cnid, path);
 	if (iserr(cnid)) return dirNFErr; // return cnid;
 
 	spec->vRefNum = vcb.vcbVRefNum;
@@ -930,7 +930,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
 
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(FID1, cnid, pb->ioNamePtr);
+	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 	if (isdir(cnid)) return fnfErr;
 
@@ -1202,7 +1202,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 }
 
 static OSErr fsCreate(struct HFileParam *pb) {
-	int err = browse(FID1, pbDirID(pb), pb->ioNamePtr);
+	int err = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
 
 	if (!iserr(err)) { // actually found a file
 		return dupFNErr;
@@ -1215,7 +1215,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 
 	if (name[0] == 0) return bdNamErr;
 
-	int32_t parentCNID = browse(FID1, pbDirID(pb), dir);
+	int32_t parentCNID = CatalogWalk(FID1, pbDirID(pb), dir);
 
 	if (iserr(parentCNID)) return dirNFErr;
 
@@ -1247,7 +1247,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 }
 
 static OSErr fsDelete(struct IOParam *pb) {
-	int32_t cnid = browse(FID1, pbDirID(pb), pb->ioNamePtr);
+	int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 
 	// Do not allow removal of open files
@@ -1272,14 +1272,14 @@ static OSErr fsRename(struct IOParam *pb) {
 	int32_t parentCNID, childCNID;
 
 	// The original file exists
-	childCNID = browse(CHILD, pbDirID(pb), pb->ioNamePtr);
+	childCNID = CatalogWalk(CHILD, pbDirID(pb), pb->ioNamePtr);
 	if (iserr(childCNID)) return childCNID;
 	parentCNID = getDBParent(childCNID);
 
 	char oldNameU[MAXNAME], newNameU[MAXNAME];
 	unsigned char newNameR[MAXNAME];
 
-	// The old name is already in Unicode, and correct thanks to browse()
+	// The old name is already in Unicode, and correct thanks to CatalogWalk()
 	strcpy(oldNameU, getDBName(childCNID));
 
 	// The new name requires conversion
@@ -1297,7 +1297,7 @@ static OSErr fsRename(struct IOParam *pb) {
 
 	// Disallow a duplicate-looking filename
 	// (The Unix/9P behaviour is to overwrite the destination silently)
-	if (!iserr(browse(JUNK, parentCNID, newNameR))) return dupFNErr;
+	if (!iserr(CatalogWalk(JUNK, parentCNID, newNameR))) return dupFNErr;
 
 	// Need a PARENT for the Trenameat call
 	WalkPath9(CHILD, PARENT, "..");
@@ -1321,7 +1321,7 @@ static OSErr fsRename(struct IOParam *pb) {
 // Must not overwrite an existing file
 static OSErr fsCatMove(struct CMovePBRec *pb) {
 	// Move the file/directory with cnid1...
-	int32_t cnid1 = browse(FID1, pbDirID(pb), pb->ioNamePtr);
+	int32_t cnid1 = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
 	if (iserr(cnid1)) return cnid1;
 	if (cnid1 == 2) return bdNamErr; // can't move root
 	const char *name = getDBName(cnid1);
@@ -1329,7 +1329,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 	// ...into the directory with cnid2.
 	// Subtle bug: if the ioNewName is an absolute path to a *different disk*,
 	// browse will nontheless carry on searching for the subpath in *this disk*.
-	int32_t cnid2 = browse(FID2, pb->ioNewDirID, pb->ioNewName);
+	int32_t cnid2 = CatalogWalk(FID2, pb->ioNewDirID, pb->ioNewName);
 	if (iserr(cnid2)) return cnid2;
 	if (!isdir(cnid2)) return bdNamErr;
 
@@ -1337,7 +1337,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 	// (The Unix/9P behaviour is to overwrite the destination silently)
 	unsigned char romanname[32];
 	mr31name(romanname, name);
-	if (!iserr(browse(FID3, cnid2, romanname))) return dupFNErr; // FID3 is junk
+	if (!iserr(CatalogWalk(FID3, cnid2, romanname))) return dupFNErr; // FID3 is junk
 
 	// Navigate "up" a level because 9P expects the parent fid
 	WalkPath9(FID1, FID1, "..");
@@ -1353,7 +1353,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
 	int32_t cnid = pbDirID(pb);
-	cnid = browse(FID1, cnid, pb->ioNamePtr);
+	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
 	if (iserr(cnid)) return cnid;
 	if (!isdir(cnid)) return fnfErr;
 
@@ -1404,7 +1404,7 @@ static OSErr fsCloseWD(struct WDParam *pb) {
 int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt) {
 	int err;
 
-	err = browse(fid, cnid, "");
+	err = CatalogWalk(fid, cnid, "");
 	if (err < 0) return ENOENT;
 
 	WalkPath9(fid, fid, "..");
@@ -1430,7 +1430,7 @@ trycreate:
 int DeleteSidecar(int32_t cnid, const char *fmt) {
 	int err;
 
-	err = browse(FID1, cnid, "");
+	err = CatalogWalk(FID1, cnid, "");
 	if (err < 0) return ENOENT;
 
 	WalkPath9(FID1, FID1, "..");
