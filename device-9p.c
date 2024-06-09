@@ -1,18 +1,8 @@
 /* Copyright (c) 2023 Elliot Nunn */
 /* Licensed under the MIT license */
 
-/*
-Driver for virtio-9p under the Macintosh File Manager
-
-The biggest challenge is that 9P (and Unix in general) only allows file access
-via a known path: supplying the inode number isn't enough.
-
-To allow MacOS clients to access a file by number (called a CNID in HFS), we
-maintain a giant database with this and other information.
-
-The "File System Manager" (a convenience layer on top of the File Manager) is
-not used because it is unavailable at the start of the boot process.
-*/
+// Driver for virtio-9p under the Macintosh File Manager
+// See ARCHITECTURE.md for discussion
 
 #include <Disks.h>
 #include <DriverGestalt.h>
