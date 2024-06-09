@@ -240,9 +240,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	// Now is safe to allocate memory for the hash table
-	HTallocate();
-
 	// Request enough buffers to transfer a megabyte in page sized chunks
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
