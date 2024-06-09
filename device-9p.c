@@ -286,7 +286,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	direrr = WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex");
 	if (direrr) panic("bad walk");
 
-	startDB();
+	CatalogInit();
+	startDB(); // this will be gotten rid of!
 
 	// Read mount_tag from config space into a C string
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)

@@ -15,6 +15,7 @@
 
 enum {
 	FIDBROWSE = FIRSTFID_CATALOG,
+	CATALOGFID,
 };
 
 #define MAXDEPTH 16
@@ -38,6 +39,15 @@ static int pathBlobSize;
 
 // used in device-9p.c
 struct Qid9 root;
+
+void CatalogInit(void) {
+	int err = Mkdir9(DOTDIRFID, 0777, 0, "catalog", NULL);
+	if (err && err!=EEXIST)
+		panic("failed create /catalog");
+
+	if (WalkPath9(DOTDIRFID, CATALOGFID, "catalog"))
+		panic("failed walk /catalog");
+}
 
 int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	if (paspath == NULL) paspath = ""; // happens a lot
