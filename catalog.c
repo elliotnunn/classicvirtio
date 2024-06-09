@@ -227,43 +227,28 @@ int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 
 // Erase the global path variables and set them to the known path of a CNID
 static bool setPath(int32_t cnid) {
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb,
-		"WITH RECURSIVE hierarchy (id, parentid, name, level) AS ( "
-			"SELECT e.id, e.parentid, e.name, 0 "
-			"FROM catalog e "
-			"WHERE e.id = ? "
+        int nbytes = 0;
+        int npath = 0;
 
-			"UNION ALL "
+        // Preflight: number of components and their total length
+        for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
+                if (i == 0) return true; // bad cnid
+                nbytes += strlen(getDBName(i)) + 1;
+                npath++;
+        }
 
-			"SELECT e.id, e.parentid, e.name, c.level + 1 "
-			"FROM catalog e "
-			"JOIN hierarchy c ON c.parentid = e.id AND c.parentid != 2 "
-		") "
-		"SELECT id, name FROM hierarchy ORDER BY level DESC; "
-	);
-	// This query is a little hefty, perhaps it could be simplified
-	// and some complexity moved to C code
+        pathBlobSize = nbytes;
+        pathCompCnt = npath;
 
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
+        for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
+                npath--;
+                expectCNID[npath] = i;
+                const char *name = getDBName(i);
+                nbytes -= strlen(name) + 1;
+                pathComps[npath] = strcpy(pathBlob + nbytes, name);
+        }
 
-	pathCompCnt = 0;
-	pathBlobSize = 0;
-
-	int sqerr;
-	while ((sqerr = sqlite3_step(S)) == SQLITE_ROW) {
-		expectCNID[pathCompCnt] = sqlite3_column_int(S, 0);
-		pathComps[pathCompCnt] = pathBlob + pathBlobSize; // a string we will populate below...
-		pathCompCnt++;
-
-		strcpy(pathBlob + pathBlobSize, sqlite3_column_text(S, 1));
-		pathBlobSize += strlen(pathBlob + pathBlobSize) + 1;
-	}
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
-	if (sqerr != SQLITE_DONE) panic("bad path query");
-	return false;
+        return false;
 }
 
 // Append to the global path variables a MacOS-style path
