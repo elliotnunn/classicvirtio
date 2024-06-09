@@ -31,9 +31,6 @@ SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 # Settle a dispute between MacTypes.h and stdbool.h
 CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
 
-# Customise sqlite for embedded operation
-CDEFS := $(CDEFS) -DSQLITE_THREADSAFE=0 -DSQLITE_OS_OTHER=1 -DSQLITE_ENABLE_MEMSYS5=1
-
 ############################# CLASSIC DRVR #############################
 
 INTERFACEONLY = $(shell m68k-apple-macos-gcc -print-file-name=libInterface.a)

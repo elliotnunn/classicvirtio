@@ -8,7 +8,7 @@ The biggest challenge is that 9P (and Unix in general) only allows file access
 via a known path: supplying the inode number isn't enough.
 
 To allow MacOS clients to access a file by number (called a CNID in HFS), we
-maintain a giant SQLite database with this and other information.
+maintain a giant database with this and other information.
 
 The "File System Manager" (a convenience layer on top of the File Manager) is
 not used because it is unavailable at the start of the boot process.
@@ -31,14 +31,12 @@ not used because it is unavailable at the start of the boot process.
 #include "catalog.h"
 #include "device.h"
 #include "fids.h"
-#include "metadb-glue.h"
 #include "multifork.h"
 #include "printf.h"
 #include "panic.h"
 #include "paramblkprint.h"
 #include "patch68k.h"
 #include "9p.h"
-#include "sqlite3.h"
 #include "timing.h"
 #include "transport.h"
 #include "unicode.h"
@@ -102,7 +100,6 @@ static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static bool visName(const char *name);
-static void startDB(void);
 int32_t mactime(int64_t unixtime);
 static long fsCall(void *pb, long selector);
 static OSErr fsDispatch(void *pb, unsigned short selector);
@@ -284,7 +281,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	if (direrr) panic("bad walk");
 
 	CatalogInit();
-	startDB(); // this will be gotten rid of!
 
 	// Read mount_tag from config space into a C string
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)
@@ -1601,26 +1597,6 @@ static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigne
 
 static bool visName(const char *name) {
 	return (name[0] != '.' && !MF.IsSidecar(name));
-}
-
-static void startDB(void) {
-	int sqerr;
-
-	// Big memory buffer for "MEMSYS5", instead of using malloc etc
-	static uint32_t dbbuf[196*1024/4];
-	sqerr = sqlite3_config(SQLITE_CONFIG_HEAP, dbbuf, sizeof dbbuf, /*mnReq important*/ 16);
-	if (sqerr != SQLITE_OK) panic("sqlite3_config");
-
-	sqerr = sqlite3_initialize();
-	if (sqerr != SQLITE_OK) panic("sqlite3_initialize");
-
-	sqerr = sqlite3_open("deebee", &metadb);
-	if (sqerr != SQLITE_OK) panic("sqlite3_open");
-
-	char *msg;
-	sqerr = sqlite3_exec(metadb, "CREATE TABLE IF NOT EXISTS catalog (id INTEGER PRIMARY KEY, parentid INTEGER, name BLOB);", NULL, NULL, &msg);
-	printf("err=%s\n", msg);
-	if (sqerr != SQLITE_OK) panic("sqlite3_exec");
 }
 
 int32_t mactime(int64_t unixtime) {

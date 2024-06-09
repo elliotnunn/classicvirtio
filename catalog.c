@@ -5,10 +5,8 @@
 
 #include "9p.h"
 #include "fids.h"
-#include "metadb-glue.h"
 #include "panic.h"
 #include "printf.h"
-#include "sqlite3.h"
 #include "unicode.h"
 
 #include "catalog.h"
@@ -352,17 +350,6 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 }
 
 void setDB(int32_t cnid, int32_t pcnid, const char *name) {
-	sqlite3_stmt *S = PERSISTENT_STMT(metadb, "INSERT OR REPLACE INTO catalog (id, parentid, name) VALUES (?, ?, ?);");
-
-	if (sqlite3_bind_int(S, 1, cnid)) panic("bind1");
-	if (sqlite3_bind_int(S, 2, pcnid)) panic("bind2");
-	if (sqlite3_bind_text(S, 3, name, -1, NULL)) panic("bind3");
-
-	if (sqlite3_step(S) != SQLITE_DONE) panic("step");
-
-	sqlite3_reset(S);
-	sqlite3_clear_bindings(S);
-
 	char tmpname[8+4+1], permname[8+1];
 	sprintf(tmpname, "%08x.tmp", cnid);
 	sprintf(permname, "%08x", cnid);
@@ -384,7 +371,6 @@ void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 
 // NULL on failure (bad CNID)
 const char *getDBName(int32_t cnid) {
-// 	printf("getDBName %#x\n", cnid);
 	int32_t pcnid;
 	static char ret[1024];
 
@@ -399,7 +385,6 @@ const char *getDBName(int32_t cnid) {
 
 // Zero on failure (bad CNID)
 int32_t getDBParent(int32_t cnid) {
-// 	printf("getDBParent %#x\n", cnid);
 	int32_t pcnid;
 
 	getDBBoth(cnid, &pcnid, NULL);
@@ -408,8 +393,6 @@ int32_t getDBParent(int32_t cnid) {
 }
 
 static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
-	printf("getDBBoth %#x\n", cnid);
-
 	char hex[8];
 
 	char permname[8+1];
