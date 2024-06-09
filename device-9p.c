@@ -267,9 +267,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Start up the database for catalog IDs and other purposes
 	Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex"))
-		anic("failed walk dotdir");
 
 	CatalogInit();
+		panic("failed walk dotdir");
 
 	// Read mount_tag from config space into a C string
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)
