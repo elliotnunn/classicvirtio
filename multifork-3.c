@@ -10,8 +10,6 @@ FILE.rdump = resource fork in Rez format
 FILE.idump = first 8 bytes of Finder info (i.e. type/creator)
 
 Directory metadata is discarded
-
-Uses the hashtab (mea culpa)
 */
 
 #include <string.h>
@@ -21,7 +19,6 @@ Uses the hashtab (mea culpa)
 #include "9p.h"
 #include "derez.h"
 #include "fids.h"
-#include "hashtab.h"
 #include "panic.h"
 #include "printf.h"
 #include "rez.h"
