@@ -440,3 +440,11 @@ static void getDBBoth(int32_t cnid, int32_t *retpcnid, char *retname) {
 
 	Clunk9(TMPFID);
 }
+
+bool IsErr(int32_t cnid) {
+	return cnid < 0;
+}
+
+bool IsDir(int32_t cnid) {
+	return (cnid & 0x40000000) == 0;
+}
