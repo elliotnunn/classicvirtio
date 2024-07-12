@@ -336,7 +336,7 @@ static int rezBody(void) {
 	wspace();
 	if (!ReadIf('{')) return -1001;
 
-	char *recv = rbuf + rbufseek - rbufat;
+	char *recv = BorrowReadBuf(1024);
 	char *send = wbuf + wbufseek - wbufat;
 
 	stem:
@@ -346,9 +346,8 @@ static int rezBody(void) {
 	case '/':
 		goto comment;
 	case '$':
-		rbufseek = recv - rbuf + rbufat;
-		FillReadBuf(1024);
-		recv = rbuf + rbufseek - rbufat;
+		ReturnReadBuf(recv);
+		recv = BorrowReadBuf(1024);
 
 		wbufseek = send - wbuf + wbufat;
 		wbufcnt = send - wbuf;
@@ -397,7 +396,7 @@ static int rezBody(void) {
 	}
 
 	realend:
-	rbufseek = recv - rbuf + rbufat;
+	ReturnReadBuf(recv);
 	wbufseek = send - wbuf + wbufat;
 	wbufcnt = send - wbuf;
 
