@@ -46,6 +46,7 @@ static int Peek(void) {
 		uint32_t got;
 		bufDiskTime -= LMGetTicks();
 		Read9(rfid, rbuf, rbufseek, rbufsize, &got);
+		if (got != rbufsize) rbuf[got] = 0; // null term for buffer borrows
 		bufDiskTime += LMGetTicks();
 		rbufat = rbufseek;
 		rbufcnt = got;
