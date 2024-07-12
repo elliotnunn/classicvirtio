@@ -341,19 +341,19 @@ static int quote(char mark, void *dest, int max) {
 		// escaped char
 		ch = Read();
 		if (ch == 'b') {
-			ch == 8;
+			ch = 8;
 		} else if (ch == 't') {
-			ch == 9;
+			ch = 9;
 		} else if (ch == 'r') {
-			ch == 10;
+			ch = 10;
 		} else if (ch == 'v') {
-			ch == 11;
+			ch = 11;
 		} else if (ch == 'f') {
-			ch == 12;
+			ch = 12;
 		} else if (ch == 'n') {
-			ch == 13;
+			ch = 13;
 		} else if (ch == '?') {
-			ch == 127;
+			ch = 127;
 		} else if (ch == '0') {
 			if (Read() != 'x') return -1;
 			ch = 0;
