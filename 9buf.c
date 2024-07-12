@@ -1,6 +1,9 @@
 /* Copyright (c) 2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
+#include <LowMem.h>
+#include <Memory.h>
+
 #include "panic.h"
 
 #include "9buf.h"
@@ -15,11 +18,37 @@ uint32_t wbufsize, wbufcnt;
 uint64_t wbufat, wbufseek;
 uint32_t wfid;
 
+long bufDiskTime;
+
 void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 	rbuf = buffer;
 	rbufsize = buflen;
 	rbufat = rbufcnt = rbufseek = 0;
 	rfid = fid;
+}
+
+// Appends a null at EOF
+size_t FillReadBuf(size_t min) {
+	uint32_t used = rbufseek - rbufat;
+	uint32_t kept = rbufcnt - used;
+
+	if (kept >= min) return kept;
+
+	// Reposition the buffer (fairly cheap)
+	BlockMoveData(rbuf + used, rbuf, kept);
+	rbufcnt = kept;
+	rbufat += used;
+
+	// Get some more bytes from disk (not sure how expensive really)
+	uint32_t gotten;
+	bufDiskTime -= LMGetTicks();
+	Read9(rfid, rbuf + kept, rbufat + kept, rbufsize - kept, &gotten);
+	bufDiskTime += LMGetTicks();
+	if (gotten < rbufsize - kept) {
+		rbuf[kept + gotten] = 0; // null terminate the file
+	}
+	rbufcnt += gotten;
+	return kept + gotten; // will return less than min only if hitting EOF
 }
 
 void SetWrite(uint32_t fid, void *buffer, uint32_t buflen) {
@@ -53,8 +82,10 @@ void Overwrite(void *buf, uint64_t at, uint32_t cnt) {
 
 	// Sad case: need an expensive syscall because bytes already flushed
 	if (ok < cnt) {
+		bufDiskTime -= LMGetTicks();
 		if (Write9(wfid, buf, at, cnt, NULL))
 			panic("9buf overwrite failure");
+		bufDiskTime += LMGetTicks();
 	}
 }
 
@@ -67,3 +98,7 @@ void Flush(void) {
 	wbufcnt = 0;
 }
 
+void FreeWriteBuf(size_t min) {
+	size_t free = wbufsize - (wbufseek - wbufat);
+	if (free < min) Flush();
+}
