@@ -7,6 +7,7 @@
 #include <LowMem.h>
 
 #include "9buf.h"
+#include "9p.h"
 #include "panic.h"
 #include "printf.h"
 
@@ -240,7 +241,7 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 // 0 = eof, 1 = good, else = error fourcc
 static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]) {
 	long err;
-	char *recv = BorrowReadBuf(2048);
+	char *recv = RBuffer(NULL, 2048);
 	*attrib = 0;
 	*hasname = false;
 #define STRIPWS() {while (whitespace[255 & *recv++]); recv--;}
@@ -308,7 +309,7 @@ constants:
 nocomma:
 	if (*recv++ != ')') return 'Hno)';
 
-	ReturnReadBuf(recv);
+	RBuffer(recv, 0);
 	return 1;
 }
 
@@ -318,7 +319,7 @@ static int rezBody(void) {
 	int32_t initialseek = wbufseek;
 	char digit1, digit2;
 
-	char *recv = BorrowReadBuf(1024);
+	char *recv = RBuffer(NULL, 1024);
 	char *send = BorrowWriteBuf(512);
 
 	while (whitespace[255 & *recv++]); recv--;
@@ -330,8 +331,7 @@ static int rezBody(void) {
 	case '/':
 		goto comment;
 	case '$':
-		ReturnReadBuf(recv);
-		recv = BorrowReadBuf(1024);
+		recv = RBuffer(recv, 1024);
 		ReturnWriteBuf(send);
 		send = BorrowWriteBuf(512);
 		goto hexquote;
@@ -359,7 +359,10 @@ static int rezBody(void) {
 	int16_t val = hexlutMS[digit1] | hexlutLS[digit2];
 	if (val < 0) {
 		recv -= 2; // those weren't paired hex digits
-		if (*recv++ != '"') panic("bad hex");
+		if (*recv++ != '"') {
+			printf("bad hex <%.20s>\n", recv-20);
+			panic("bad hex");
+		}
 		goto stem;
 	}
 	*send++ = val;
@@ -376,7 +379,7 @@ static int rezBody(void) {
 	}
 
 	realend:
-	ReturnReadBuf(recv);
+	RBuffer(recv, 0); // relinquish
 	ReturnWriteBuf(send);
 
 	return 0;

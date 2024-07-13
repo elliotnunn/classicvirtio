@@ -4,15 +4,20 @@
 #include <LowMem.h>
 #include <Memory.h>
 
+#include <stdbool.h>
+#include <string.h> // DELETE THIS once MEMCPY gone
+
+#include "9p.h"
 #include "panic.h"
+#include "printf.h"
 
 #include "9buf.h"
 
-char *rbuf;
-uint32_t rbufsize, rbufcnt;
-uint64_t rbufat, rbufseek;
-char *rborrow;
-uint32_t rfid;
+static uint32_t rfid;
+static bool rbufok;
+static char *rbuf, *rborrow;
+static uint32_t rbufsize;
+static uint64_t rbufat, rseek;
 
 char *wbuf;
 uint32_t wbufsize, wbufcnt;
@@ -23,46 +28,72 @@ uint32_t wfid;
 long bufDiskTime;
 
 void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
+	rfid = fid;
+	rbufok = false;
+	rborrow = NULL;
 	rbuf = buffer;
 	rbufsize = buflen;
-	rbufat = rbufcnt = rbufseek = 0;
-	rfid = fid;
+	rbufat = rseek = 0;
 }
 
-// Appends a null at EOF
-char *BorrowReadBuf(size_t min) {
-	uint32_t used = rbufseek - rbufat;
-	uint32_t kept = rbufcnt - used;
-
-	if (kept < min) {
-		// Reposition the buffer (fairly cheap)
-		BlockMoveData(rbuf + used, rbuf, kept);
-		rbufcnt = kept;
-		rbufat += used;
-
-		// Get some more bytes from disk (not sure how expensive really)
-		uint32_t gotten;
-		bufDiskTime -= LMGetTicks();
-		Read9(rfid, rbuf + kept, rbufat + kept, rbufsize - kept, &gotten);
-		bufDiskTime += LMGetTicks();
-		if (gotten < rbufsize - kept) {
-			rbuf[kept + gotten] = 0; // null terminate the file
-		}
-		rbufcnt += gotten;
-	}
-
-	rborrow = rbuf + rbufseek - rbufat;
-	return rborrow;
+void RSeek(uint64_t to) {
+	if (rborrow) panic("RSeek before returning RBuffer");
+	rseek = to;
 }
 
-// Signals how many bytes were consumed since BorrowReadBuf
-void ReturnReadBuf(char *borrowed) {
-	// allowed to read and step past the terminating null
-	if (borrowed > rbuf + rbufcnt + 2) {
-		panic("read past end of buffer!");
+uint64_t RTell(void) {
+	return rseek;
+}
+
+// Reads past the end of the file are nulls
+char *RBuffer(char *giveback, size_t min) {
+	//printf("RBuffer(%#010x, %d)\n", giveback, min);
+
+	// Fast path: plenty of room left in this buffer
+	if (rbufok && giveback && min!=0 && giveback+min <= rbuf+rbufsize) {
+		//printf("Fast path read ...<%.10s> then <%.50s>\n", giveback-10, giveback);
+		return giveback;
 	}
-	rbufseek += (borrowed - rborrow);
-	rborrow = NULL;
+	//printf("   Slow path\n");
+
+	// Seek forward (by comparing the passed-in ptr to the last one we returned)
+	if (giveback) {
+		if (!rborrow) panic("giveback without borrowing\n");
+		//printf("Seeking fwd by <%.*s>\n", giveback - rborrow, rborrow);
+		rseek += giveback - rborrow;
+	}
+
+	// Calls that seek but don't otherwise require further data
+	if (min == 0) {
+		return rborrow = NULL;
+	}
+
+	// Try to satisfy the entire request from the buffer
+	if (rbufok && rseek>=rbufat && rseek+min<rbufat+rbufsize) {
+		//printf("   Satisfied from buffer, returning %p\n", rbuf + (rseek-rbufat));
+		return rborrow = rbuf + (rseek-rbufat);
+	}
+	//printf("   Not satisfied from buffer\n");
+
+	// Instead try to salvage some bytes from the buffer, move them left
+	size_t salvaged = 0;
+	if (rbufok && rbufat+rbufsize > rseek) {
+		salvaged = rbufsize - (rseek - rbufat);
+		//printf("   Salvaging %d bytes\n", salvaged);
+		BlockMove(rbuf + (rseek - rbufat), rbuf, salvaged);
+	}
+
+	// Make an expensive Tread call
+	uint32_t gotten;
+	//printf("   Read9 %d %p %#x %#x\n", rfid, rbuf+salvaged, (long)rseek, rbufsize-salvaged);
+	Read9(rfid, rbuf+salvaged, rseek+salvaged, rbufsize-salvaged, &gotten);
+	//printf("   Got %#x chars\n", gotten);
+	if (salvaged+gotten < rbufsize) rbuf[salvaged+gotten] = 0; // null-term EOF
+
+	rbufok = true;
+	rbufat = rseek;
+	//printf("   Returning %p\n", rbuf);
+	return rborrow = rbuf;
 }
 
 void SetWrite(uint32_t fid, void *buffer, uint32_t buflen) {
