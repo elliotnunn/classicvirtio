@@ -5,7 +5,6 @@
 #include <Memory.h>
 
 #include "panic.h"
-#include "printf.h"
 
 #include "9buf.h"
 
@@ -18,6 +17,7 @@ uint32_t rfid;
 char *wbuf;
 uint32_t wbufsize, wbufcnt;
 uint64_t wbufat, wbufseek;
+char *wborrow;
 uint32_t wfid;
 
 long bufDiskTime;
@@ -112,7 +112,16 @@ void Flush(void) {
 	wbufcnt = 0;
 }
 
-void FreeWriteBuf(size_t min) {
+char *BorrowWriteBuf(size_t min) {
 	size_t free = wbufsize - (wbufseek - wbufat);
 	if (free < min) Flush();
+	wborrow = wbuf + wbufseek - wbufat;
+	return wborrow;
+}
+
+void ReturnWriteBuf(char *borrowed) {
+	if (borrowed > wbuf + wbufsize) panic("wrote past end of buffer!");
+	wbufseek += borrowed - wborrow;
+	wbufcnt += borrowed - wborrow;
+	wborrow = NULL;
 }

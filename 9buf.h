@@ -26,7 +26,8 @@ void WriteBuf(void *x, size_t n);
 static void Write(char x);
 void Overwrite(void *buf, uint64_t at, uint32_t cnt); // for resource forks specifically
 void Flush(void);
-void FreeWriteBuf(size_t min);
+char *BorrowWriteBuf(size_t min);
+void ReturnWriteBuf(char *borrowed);
 
 // Feel free to play with these globals
 extern char *rbuf;

@@ -337,7 +337,7 @@ static int rezBody(void) {
 	if (!ReadIf('{')) return -1001;
 
 	char *recv = BorrowReadBuf(1024);
-	char *send = wbuf + wbufseek - wbufat;
+	char *send = BorrowWriteBuf(512);
 
 	stem:
 	switch (*recv++) {
@@ -348,12 +348,8 @@ static int rezBody(void) {
 	case '$':
 		ReturnReadBuf(recv);
 		recv = BorrowReadBuf(1024);
-
-		wbufseek = send - wbuf + wbufat;
-		wbufcnt = send - wbuf;
-		FreeWriteBuf(512);
-		send = wbuf + wbufseek - wbufat;
-
+		ReturnWriteBuf(send);
+		send = BorrowWriteBuf(512);
 		goto hexquote;
 	case '}':
 		goto end;
@@ -397,8 +393,7 @@ static int rezBody(void) {
 
 	realend:
 	ReturnReadBuf(recv);
-	wbufseek = send - wbuf + wbufat;
-	wbufcnt = send - wbuf;
+	ReturnWriteBuf(send);
 
 	return 0;
 }
