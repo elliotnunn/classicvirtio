@@ -27,6 +27,8 @@ static int hex(char ch);
 static long integer(char **src);
 static int resorder(const void *a, const void *b);
 
+static const char whitespace[256] = {[' ']=1, ['\n']=1, ['\r']=1, ['\t']=1};
+
 static const uint16_t hexlutMS[256] = {
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
@@ -236,8 +238,6 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 
 	return 256+contentsize+28+2+8*ntype+12*nres+namesize;
 }
-
-static const char whitespace[256] = {[' ']=1, ['\n']=1, ['\r']=1, ['\t']=1};
 
 // 0 = eof, 1 = good, else = error fourcc
 static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]) {
