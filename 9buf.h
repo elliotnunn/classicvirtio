@@ -18,7 +18,8 @@ void SetRead(uint32_t fid, void *buffer, uint32_t buflen);
 static int Peek(void);
 static int Read(void);
 static bool ReadIf(char want);
-size_t FillReadBuf(size_t min);
+char *BorrowReadBuf(size_t min);
+void ReturnReadBuf(char *borrowed);
 
 void SetWrite(uint32_t fid, void *buffer, uint32_t buflen);
 void WriteBuf(void *x, size_t n);

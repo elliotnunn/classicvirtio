@@ -5,12 +5,14 @@
 #include <Memory.h>
 
 #include "panic.h"
+#include "printf.h"
 
 #include "9buf.h"
 
 char *rbuf;
 uint32_t rbufsize, rbufcnt;
 uint64_t rbufat, rbufseek;
+char *rborrow;
 uint32_t rfid;
 
 char *wbuf;
@@ -28,27 +30,39 @@ void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 }
 
 // Appends a null at EOF
-size_t FillReadBuf(size_t min) {
+char *BorrowReadBuf(size_t min) {
 	uint32_t used = rbufseek - rbufat;
 	uint32_t kept = rbufcnt - used;
 
-	if (kept >= min) return kept;
+	if (kept < min) {
+		// Reposition the buffer (fairly cheap)
+		BlockMoveData(rbuf + used, rbuf, kept);
+		rbufcnt = kept;
+		rbufat += used;
 
-	// Reposition the buffer (fairly cheap)
-	BlockMoveData(rbuf + used, rbuf, kept);
-	rbufcnt = kept;
-	rbufat += used;
-
-	// Get some more bytes from disk (not sure how expensive really)
-	uint32_t gotten;
-	bufDiskTime -= LMGetTicks();
-	Read9(rfid, rbuf + kept, rbufat + kept, rbufsize - kept, &gotten);
-	bufDiskTime += LMGetTicks();
-	if (gotten < rbufsize - kept) {
-		rbuf[kept + gotten] = 0; // null terminate the file
+		// Get some more bytes from disk (not sure how expensive really)
+		uint32_t gotten;
+		bufDiskTime -= LMGetTicks();
+		Read9(rfid, rbuf + kept, rbufat + kept, rbufsize - kept, &gotten);
+		bufDiskTime += LMGetTicks();
+		if (gotten < rbufsize - kept) {
+			rbuf[kept + gotten] = 0; // null terminate the file
+		}
+		rbufcnt += gotten;
 	}
-	rbufcnt += gotten;
-	return kept + gotten; // will return less than min only if hitting EOF
+
+	rborrow = rbuf + rbufseek - rbufat;
+	return rborrow;
+}
+
+// Signals how many bytes were consumed since BorrowReadBuf
+void ReturnReadBuf(char *borrowed) {
+	// allowed to read and step past the terminating null
+	if (borrowed > rbuf + rbufcnt + 2) {
+		panic("read past end of buffer!");
+	}
+	rbufseek += (borrowed - rborrow);
+	rborrow = NULL;
 }
 
 void SetWrite(uint32_t fid, void *buffer, uint32_t buflen) {
