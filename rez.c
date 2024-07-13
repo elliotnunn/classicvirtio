@@ -22,7 +22,6 @@ struct res {
 static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]);
 static int rezBody(void);
 static bool isword(const char *word);
-static void wspace();
 static long quote(char *dest, char **src, char mark, int min, int max);
 static int hex(char ch);
 static long integer(char **src);
@@ -321,11 +320,11 @@ static int rezBody(void) {
 	int32_t initialseek = wbufseek;
 	char digit1, digit2;
 
-	wspace();
-	if (!ReadIf('{')) return -1001;
-
 	char *recv = BorrowReadBuf(1024);
 	char *send = BorrowWriteBuf(512);
+
+	while (whitespace[255 & *recv++]); recv--;
+	if (*recv++ != '{') return -1001;
 
 	stem:
 	switch (*recv++) {
@@ -393,30 +392,6 @@ static bool isword(const char *word) {
 		}
 	}
 	return true;
-}
-
-// Supports /*comments*/
-// a hack for simplicity: a single / is treated as whitespace
-static void wspace() {
-	for (;;) {
-		char ch = Peek();
-		if (ch==' ' || ch=='\n' || ch=='\r' || ch=='\t' || ch=='\v' || ch=='\f') {
-			Read();
-		} else if (ch=='/') {
-			Read();
-			if (!ReadIf('*')) return;
-
-			int last = 0;
-			for (;;) {
-				ch = Read();
-				if (ch<0) return; // eof
-				if (last=='*' && ch=='/') break;
-				last = ch;
-			}
-		} else {
-			return;
-		}
-	}
 }
 
 // return the number of chars or a much larger error code
