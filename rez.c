@@ -327,9 +327,8 @@ static int rezBody(void) {
 	if (*recv++ != '{') return -1001;
 
 	stem:
+	while (whitespace[255 & *recv++]); recv--;
 	switch (*recv++) {
-	case ' ': case '\t': case '\r': case '\n':
-		goto stem;
 	case '/':
 		goto comment;
 	case '$':
