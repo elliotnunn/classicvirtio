@@ -176,12 +176,14 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	}
 
 	// Resource map header
-	for (int i=0; i<25; i++) Write(0);
-	Write(28); // offset to type list
-	Write((28 + 2 + 8*ntype + 12*nres) >> 8); // offset to name
-	Write((28 + 2 + 8*ntype + 12*nres) >> 0);
-	Write((ntype - 1) >> 8); // resource types in the map minus 1
-	Write((ntype - 1) >> 0);
+	char *b = BorrowWriteBuf(30);
+	for (int i=0; i<25; i++) *b++ = 0;
+	*b++ = 28; // offset to type list
+	*b++ = (28 + 2 + 8*ntype + 12*nres) >> 8; // offset to name
+	*b++ = (28 + 2 + 8*ntype + 12*nres) >> 0;
+	*b++ = (ntype - 1) >> 8; // resource types in the map minus 1
+	*b++ = (ntype - 1) >> 0;
+	ReturnWriteBuf(b);
 
 	// Resource type list
 	int base = 2 + 8*ntype;
@@ -189,14 +191,16 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	for (int i=0; i<nres; i++) {
 		if (i==nres-1 || resources[i].type!=resources[i+1].type) {
 			// last resource of this type
-			Write(resources[i].type >> 24);
-			Write(resources[i].type >> 16);
-			Write(resources[i].type >> 8);
-			Write(resources[i].type >> 0);
-			Write(ott >> 8);
-			Write(ott >> 0);
-			Write(base >> 8);
-			Write(base >> 0);
+			char *b = BorrowWriteBuf(8);
+			*b++ = resources[i].type >> 24;
+			*b++ = resources[i].type >> 16;
+			*b++ = resources[i].type >> 8;
+			*b++ = resources[i].type >> 0;
+			*b++ = ott >> 8;
+			*b++ = ott >> 0;
+			*b++ = base >> 8;
+			*b++ = base >> 0;
+			ReturnWriteBuf(b);
 			base += 12 * (ott + 1);
 			ott = 0;
 		} else {
