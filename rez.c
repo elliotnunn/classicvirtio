@@ -21,9 +21,7 @@ struct res {
 
 static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasname, uint8_t name[256]);
 static int rezBody(void);
-static bool isword(const char *word);
 static long quote(char *dest, char **src, char mark, int min, int max);
-static int hex(char ch);
 static long integer(char **src);
 static int resorder(const void *a, const void *b);
 
@@ -384,15 +382,6 @@ static int rezBody(void) {
 	return 0;
 }
 
-static bool isword(const char *word) {
-	while (*word) {
-		if (Read() != *word++) {
-			return false;
-		}
-	}
-	return true;
-}
-
 // return the number of chars or a much larger error code
 static long quote(char *dest, char **src, char mark, int min, int max) {
 	char *s = *src; // need to set this ptr back before returning (if success anyhow)
@@ -437,18 +426,6 @@ static long quote(char *dest, char **src, char mark, int min, int max) {
 
 	*src = s; // advance the ptr
 	return cnt;
-}
-
-static int hex(char ch) {
-	if (ch >= '0' && ch <= '9') {
-		return ch - '0';
-	} else if (ch >= 'a' && ch <= 'f') {
-		return ch - 'a' + 10;
-	} else if (ch >= 'A' && ch <= 'F') {
-		return ch - 'A' + 10;
-	} else {
-		return -1;
-	}
 }
 
 static long integer(char **src) {
