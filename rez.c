@@ -206,15 +206,17 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 
 	// Resource reference list
 	for (int i=0; i<nres; i++) {
-		Write(resources[i].id >> 8);
-		Write(resources[i].id >> 0);
-		Write(resources[i].nameoff >> 8);
-		Write(resources[i].nameoff >> 0);
-		Write(resources[i].attrandoff >> 24);
-		Write(resources[i].attrandoff >> 16);
-		Write(resources[i].attrandoff >> 8);
-		Write(resources[i].attrandoff >> 0);
-		for (int i=0; i<4; i++) Write(0);
+		char *b = BorrowWriteBuf(12);
+		*b++ = resources[i].id >> 8;
+		*b++ = resources[i].id >> 0;
+		*b++ = resources[i].nameoff >> 8;
+		*b++ = resources[i].nameoff >> 0;
+		*b++ = resources[i].attrandoff >> 24;
+		*b++ = resources[i].attrandoff >> 16;
+		*b++ = resources[i].attrandoff >> 8;
+		*b++ = resources[i].attrandoff >> 0;
+		for (int i=0; i<4; i++) *b++ = 0;
+		ReturnWriteBuf(b);
 	}
 
 	for (int i=0; i<namesize; i++) {
