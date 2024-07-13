@@ -140,10 +140,12 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 			panic("too many resources in file");
 		}
 
-		while (wbufseek % 4) Write(0); // 4-byte align the resource
 		r.attrandoff = (wbufseek - 256) | ((uint32_t)attrib << 24);
 		int64_t lenheaderpos = wbufseek;
-		for (int i=0; i<4; i++) Write(0);
+
+		char *b = BorrowWriteBuf(4);
+		for (int i=0; i<4; i++) *b++ = 0;
+		ReturnWriteBuf(b);
 
 		if (rezBody()) panic("failed to read Rez body");
 
