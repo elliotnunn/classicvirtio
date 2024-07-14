@@ -16,10 +16,10 @@
 static uint32_t rfid;
 static bool rbufok; // todo: make this redundant with a nonsense rbufat value
 static char *rbuf, *rborrow;
-static uint32_t rbufsize;
-static uint64_t rbufat, rseek;
+static int32_t rbufsize;
+static int32_t rbufat, rseek;
 
-void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
+void SetRead(uint32_t fid, void *buffer, int32_t buflen) {
 	rfid = fid;
 	rbufok = false;
 	rborrow = NULL;
@@ -28,12 +28,12 @@ void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 	rbufat = rseek = 0;
 }
 
-void RSeek(uint64_t to) {
+void RSeek(int32_t to) {
 	if (rborrow) panic("RSeek before RBuffer giveback");
 	rseek = to;
 }
 
-uint64_t RTell(void) {
+int32_t RTell(void) {
 	return rseek;
 }
 
@@ -70,7 +70,7 @@ char *RBuffer(char *giveback, size_t min) {
 	}
 
 	// Make an expensive Tread call
-	uint32_t gotten;
+	int32_t gotten;
 	Read9(rfid, rbuf+salvaged, rseek+salvaged, rbufsize-salvaged, &gotten);
 	if (salvaged+gotten < rbufsize) rbuf[salvaged+gotten] = 0; // null-term EOF
 

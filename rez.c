@@ -139,7 +139,7 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 			panic("too many resources in file");
 		}
 
-		int64_t lenheaderpos = WTell();
+		int32_t lenheaderpos = WTell();
 		r.attrandoff = (lenheaderpos - 256) | ((uint32_t)attrib << 24);
 
 		char *b = WBuffer(NULL, 4);

@@ -10,9 +10,9 @@
 
 #include <stdint.h>
 
-void SetRead(uint32_t fid, void *buffer, uint32_t buflen);
-void RSeek(uint64_t to);
-uint64_t RTell(void);
+void SetRead(uint32_t fid, void *buffer, int32_t buflen);
+void RSeek(int32_t to);
+int32_t RTell(void);
 char *RBuffer(char *giveback, size_t min);
 
 void SetWrite(uint32_t fid, void *buffer, int32_t buflen);
