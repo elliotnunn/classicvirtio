@@ -9,23 +9,16 @@
 
 #include "9p.h"
 #include "panic.h"
-#include "printf.h"
 
 #include "9buf.h"
 
+/********************************** READING **********************************/
+
 static uint32_t rfid;
-static bool rbufok;
+static bool rbufok; // todo: make this redundant with a nonsense rbufat value
 static char *rbuf, *rborrow;
 static uint32_t rbufsize;
 static uint64_t rbufat, rseek;
-
-char *wbuf;
-uint32_t wbufsize, wbufcnt;
-uint64_t wbufat, wbufseek;
-char *wborrow;
-uint32_t wfid;
-
-long bufDiskTime;
 
 void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 	rfid = fid;
@@ -37,7 +30,7 @@ void SetRead(uint32_t fid, void *buffer, uint32_t buflen) {
 }
 
 void RSeek(uint64_t to) {
-	if (rborrow) panic("RSeek before returning RBuffer");
+	if (rborrow) panic("RSeek before RBuffer giveback");
 	rseek = to;
 }
 
@@ -45,7 +38,9 @@ uint64_t RTell(void) {
 	return rseek;
 }
 
-// Reads past the end of the file are nulls
+// "Borrow" a pointer into a contiguous chunk of the buffer, and/or
+// giveback a previously borrowed pointer, plus the number of bytes consumed.
+// (file gets null terminated)
 char *RBuffer(char *giveback, size_t min) {
 	//printf("RBuffer(%#010x, %d)\n", giveback, min);
 
@@ -58,7 +53,7 @@ char *RBuffer(char *giveback, size_t min) {
 
 	// Seek forward (by comparing the passed-in ptr to the last one we returned)
 	if (giveback) {
-		if (!rborrow) panic("giveback without borrowing\n");
+		if (!rborrow) panic("RBuffer giveback without borrowing\n");
 		//printf("Seeking fwd by <%.*s>\n", giveback - rborrow, rborrow);
 		rseek += giveback - rborrow;
 	}
@@ -96,30 +91,71 @@ char *RBuffer(char *giveback, size_t min) {
 	return rborrow = rbuf;
 }
 
-void SetWrite(uint32_t fid, void *buffer, uint32_t buflen) {
+/********************************** WRITING **********************************/
+
+// Limited to writing contiguously from the start of the file,
+// "Rewrite" being the only exception
+
+static uint32_t wfid;
+static char *wbuf, *wborrow;
+static int32_t wseek, wbufsize, wbufat;
+
+void SetWrite(uint32_t fid, void *buffer, int32_t buflen) {
+	wfid = fid;
+	wborrow = NULL;
 	wbuf = buffer;
 	wbufsize = buflen;
-	wbufat = wbufcnt = wbufseek = 0;
-	wfid = fid;
+	wbufat = wseek = 0;
 }
 
-void WriteBuf(void *x, size_t n) {
-	if (wbufcnt + n > wbufsize) {
-		Flush();
+int32_t WTell(void) {
+	return wseek;
+}
+
+// "Borrow" a pointer into a contiguous chunk of the buffer, and/or
+// giveback a previously borrowed pointer, plus the number of bytes produced.
+char *WBuffer(char *giveback, int32_t min) {
+	// Fast path: plenty of room left in this buffer
+	if (giveback && min!=0 && giveback+min <= wbuf+wbufsize) {
+		return giveback;
 	}
 
-	memcpy(wbuf + wbufcnt, x, n);
-	wbufcnt += n;
-	wbufseek += n;
+	// Seek forward (by comparing the passed-in ptr to the last one we returned)
+	if (giveback) {
+		if (!wborrow) panic("WBuffer giveback without borrowing\n");
+		wseek += giveback - wborrow;
+	}
+
+	// Calls that seek but don't otherwise require further data
+	if (min == 0) {
+		return wborrow = NULL;
+	}
+
+	// Try to satisfy the request from the buffer
+	if (wseek+min<wbufat+wbufsize) {
+		return wborrow = wbuf + (wseek-wbufat);
+	}
+
+	WFlush();
+	return wborrow = wbuf;
 }
 
-// Overwrite: special case for resource forks
-// Optimises so we usually don't seek backwards
-// *Must* have already written these bytes with Write(0)
-void Overwrite(void *buf, uint64_t at, uint32_t cnt) {
-	uint32_t ok = 0;
-	for (uint32_t i=0; i<cnt; i++) {
-		if (at+i >= wbufat && at+i < wbufat+wbufcnt) {
+void WFlush(void) {
+	if (wseek > wbufat) {
+		if (Write9(wfid, wbuf, wbufat, wseek-wbufat, NULL)) {
+			panic("WFlush Twrite failed");
+		}
+	}
+	wbufat = wseek;
+}
+
+// Special case for resource forks:
+// the only way to rewrite bytes that were already written with WBuffer
+void Rewrite(void *buf, int32_t at, int32_t cnt) {
+	// Happy case: edit data still in buffer
+	int32_t ok = 0;
+	for (int32_t i=0; i<cnt; i++) {
+		if (at+i >= wbufat && at+i < wseek) {
 			wbuf[at+i-wbufat] = ((char *)buf)[i];
 			ok++;
 		}
@@ -127,32 +163,8 @@ void Overwrite(void *buf, uint64_t at, uint32_t cnt) {
 
 	// Sad case: need an expensive syscall because bytes already flushed
 	if (ok < cnt) {
-		bufDiskTime -= LMGetTicks();
-		if (Write9(wfid, buf, at, cnt, NULL))
-			panic("9buf overwrite failure");
-		bufDiskTime += LMGetTicks();
+		if (Write9(wfid, buf, at, cnt, NULL)) {
+			panic("Rewrite Twrite failed");
+		}
 	}
-}
-
-void Flush(void) {
-	if (wbufcnt > 0) {
-		int err = Write9(wfid, wbuf, wbufat, wbufcnt, NULL);
-		if (err) panic("9buf flush fail");
-	}
-	wbufat = wbufseek;
-	wbufcnt = 0;
-}
-
-char *BorrowWriteBuf(size_t min) {
-	size_t free = wbufsize - (wbufseek - wbufat);
-	if (free < min) Flush();
-	wborrow = wbuf + wbufseek - wbufat;
-	return wborrow;
-}
-
-void ReturnWriteBuf(char *borrowed) {
-	if (borrowed > wbuf + wbufsize) panic("wrote past end of buffer!");
-	wbufseek += borrowed - wborrow;
-	wbufcnt += borrowed - wborrow;
-	wborrow = NULL;
 }

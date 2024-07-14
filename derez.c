@@ -156,8 +156,8 @@ static char *lutget(char *dest, const char *lut, char letter) {
 }
 
 static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
-	char header[2048] = "data '";
-	char *p = header + 6;
+	char *p = WBuffer(NULL, 2048);
+	p = stpcpy(p, "data '");
 
 	for (int i=0; i<4; i++) {
 		p = lutget(p, lut, type[i]);
@@ -196,8 +196,7 @@ static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	}
 
 	p = stpcpy(p, ") {\n");
-
-	WriteBuf(header, p-header);
+	WBuffer(p, 0);
 }
 
 static char cmtLUT[256] =

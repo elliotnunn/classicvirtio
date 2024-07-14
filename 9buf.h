@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
 
 void SetRead(uint32_t fid, void *buffer, uint32_t buflen);
@@ -16,28 +15,8 @@ void RSeek(uint64_t to);
 uint64_t RTell(void);
 char *RBuffer(char *giveback, size_t min);
 
-void SetWrite(uint32_t fid, void *buffer, uint32_t buflen);
-void WriteBuf(void *x, size_t n);
-static void Write(char x);
-void Overwrite(void *buf, uint64_t at, uint32_t cnt); // for resource forks specifically
-void Flush(void);
-char *BorrowWriteBuf(size_t min);
-void ReturnWriteBuf(char *borrowed);
-
-// Feel free to play with these globals
-extern char *wbuf;
-extern uint32_t wbufsize, wbufcnt;
-extern uint64_t wbufat, wbufseek;
-extern uint32_t wfid;
-
-extern long bufDiskTime;
-
-static void Write(char x) {
-	if (wbufcnt >= wbufsize) {
-		Flush();
-	}
-
-	wbuf[wbufcnt] = x;
-	wbufcnt++;
-	wbufseek++;
-}
+void SetWrite(uint32_t fid, void *buffer, int32_t buflen);
+int32_t WTell(void);
+char *WBuffer(char *giveback, int32_t min);
+void WFlush(void);
+void Rewrite(void *buf, int32_t at, int32_t cnt);

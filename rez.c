@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <LowMem.h>
-
 #include "9buf.h"
 #include "9p.h"
 #include "panic.h"
@@ -99,9 +97,6 @@ static const uint16_t hexlutLS[256] = {
 };
 
 uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
-	long t = LMGetTicks();
-	bufDiskTime = 0;
-
 	int err;
 	int nres = 0;
 	struct res resources[2727]; // see Guide to the File System Manager v1.2 pD-3
@@ -113,9 +108,13 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	// Hefty stack IO buffer, rededicate to reading after writes done
 	enum {WB = 8*1024, RB = 32*1024};
 	char buf[WB+RB];
-	SetWrite(forkfid, buf, WB);
 	SetRead(textfid, buf+WB, RB);
-	wbufat = wbufseek = 256;
+	SetWrite(forkfid, buf, WB);
+
+	char *b = WBuffer(NULL, 256);
+	memset(b, 0, 256);
+	b += 256;
+	WBuffer(b, 0);
 
 	// Slurp the Rez file sequentially, acquiring:
 	// type/id/attrib/bodyoffset/nameoffset into resources array
@@ -140,17 +139,17 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 			panic("too many resources in file");
 		}
 
-		r.attrandoff = (wbufseek - 256) | ((uint32_t)attrib << 24);
-		int64_t lenheaderpos = wbufseek;
+		int64_t lenheaderpos = WTell();
+		r.attrandoff = (lenheaderpos - 256) | ((uint32_t)attrib << 24);
 
-		char *b = BorrowWriteBuf(4);
+		char *b = WBuffer(NULL, 4);
 		for (int i=0; i<4; i++) *b++ = 0;
-		ReturnWriteBuf(b);
+		WBuffer(b, 0);
 
 		if (rezBody()) panic("failed to read Rez body");
 
-		uint32_t bodylen = wbufseek - lenheaderpos - 4;
-		Overwrite(&bodylen, lenheaderpos, 4);
+		uint32_t bodylen = WTell() - lenheaderpos - 4;
+		Rewrite(&bodylen, lenheaderpos, 4);
 
 		// append the name to the packed name list
 		if (hasname) {
@@ -165,10 +164,10 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 
 		resources[nres++] = r;
 	}
-	contentsize = wbufseek - 256;
+	contentsize = WTell() - 256;
 
 	// We will no longer use the read buffer, rededicate it to write buffer
-	wbufsize = WB + RB;
+	// (actually this capability was removed, rethink how to do this)
 
 	// Group resources of the same type together and count unique types
 	qsort(resources, nres, sizeof *resources, resorder);
@@ -178,14 +177,14 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	}
 
 	// Resource map header
-	char *b = BorrowWriteBuf(30);
+	b = WBuffer(NULL, 30);
 	for (int i=0; i<25; i++) *b++ = 0;
 	*b++ = 28; // offset to type list
 	*b++ = (28 + 2 + 8*ntype + 12*nres) >> 8; // offset to name
 	*b++ = (28 + 2 + 8*ntype + 12*nres) >> 0;
 	*b++ = (ntype - 1) >> 8; // resource types in the map minus 1
 	*b++ = (ntype - 1) >> 0;
-	ReturnWriteBuf(b);
+	WBuffer(b, 0);
 
 	// Resource type list
 	int base = 2 + 8*ntype;
@@ -193,7 +192,7 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	for (int i=0; i<nres; i++) {
 		if (i==nres-1 || resources[i].type!=resources[i+1].type) {
 			// last resource of this type
-			char *b = BorrowWriteBuf(8);
+			char *b = WBuffer(NULL, 8);
 			*b++ = resources[i].type >> 24;
 			*b++ = resources[i].type >> 16;
 			*b++ = resources[i].type >> 8;
@@ -202,7 +201,7 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 			*b++ = ott >> 0;
 			*b++ = base >> 8;
 			*b++ = base >> 0;
-			ReturnWriteBuf(b);
+			WBuffer(b, 0);
 			base += 12 * (ott + 1);
 			ott = 0;
 		} else {
@@ -212,7 +211,7 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 
 	// Resource reference list
 	for (int i=0; i<nres; i++) {
-		char *b = BorrowWriteBuf(12);
+		char *b = WBuffer(NULL, 12);
 		*b++ = resources[i].id >> 8;
 		*b++ = resources[i].id >> 0;
 		*b++ = resources[i].nameoff >> 8;
@@ -222,14 +221,8 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 		*b++ = resources[i].attrandoff >> 8;
 		*b++ = resources[i].attrandoff >> 0;
 		for (int i=0; i<4; i++) *b++ = 0;
-		ReturnWriteBuf(b);
+		WBuffer(b, 0);
 	}
-
-	for (int i=0; i<namesize; i++) {
-		Write(namelist[i]);
-	}
-
-	Flush();
 
 	uint32_t head[4] = {
 		256,
@@ -237,11 +230,15 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 		contentsize,
 		28+2+8*ntype+12*nres+namesize
 	};
+	Rewrite(head, 0, sizeof head);
+	WFlush();
 
-	Write9(forkfid, head, 0, sizeof head, NULL);
+	// Does this strictly need to be a separate call?
+	if (Write9(forkfid, namelist, WTell(), namesize, NULL)) {
+		panic("failed to write name list");
+	}
 
-	t = LMGetTicks()-t;
-	// printf("Rezzing took %ld ms total, %ld ms disk\n", t*1000/60, bufDiskTime*1000/60);
+	panic("done writing, check it out");
 
 	return 256+contentsize+28+2+8*ntype+12*nres+namesize;
 }
@@ -275,7 +272,7 @@ static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasnam
 	*hasname = true;
 	err = quote((char *)name+1, &recv, '"', 0, 255);
 	if (err > 255) return err;
-	hasname[0] = err;
+	name[0] = err;
 	STRIPWS();
 	if (*recv != ',') goto nocomma;
 	recv++;
@@ -324,11 +321,10 @@ nocomma:
 // critically important for speed
 // return nonzero on error
 static int rezBody(void) {
-	int32_t initialseek = wbufseek;
 	char digit1, digit2;
 
 	char *recv = RBuffer(NULL, 1024);
-	char *send = BorrowWriteBuf(512);
+	char *send = WBuffer(NULL, 512);
 
 	while (whitespace[255 & *recv++]); recv--;
 	if (*recv++ != '{') return -1001;
@@ -340,8 +336,7 @@ static int rezBody(void) {
 		goto comment;
 	case '$':
 		recv = RBuffer(recv, 1024);
-		ReturnWriteBuf(send);
-		send = BorrowWriteBuf(512);
+		send = WBuffer(send, 512);
 		goto hexquote;
 	case '}':
 		goto end;
@@ -388,7 +383,7 @@ static int rezBody(void) {
 
 	realend:
 	RBuffer(recv, 0); // relinquish
-	ReturnWriteBuf(send);
+	WBuffer(send, 0);
 
 	return 0;
 }
