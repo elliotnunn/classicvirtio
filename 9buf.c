@@ -42,19 +42,14 @@ uint64_t RTell(void) {
 // giveback a previously borrowed pointer, plus the number of bytes consumed.
 // (file gets null terminated)
 char *RBuffer(char *giveback, size_t min) {
-	//printf("RBuffer(%#010x, %d)\n", giveback, min);
-
 	// Fast path: plenty of room left in this buffer
 	if (rbufok && giveback && min!=0 && giveback+min <= rbuf+rbufsize) {
-		//printf("Fast path read ...<%.10s> then <%.50s>\n", giveback-10, giveback);
 		return giveback;
 	}
-	//printf("   Slow path\n");
 
 	// Seek forward (by comparing the passed-in ptr to the last one we returned)
 	if (giveback) {
 		if (!rborrow) panic("RBuffer giveback without borrowing\n");
-		//printf("Seeking fwd by <%.*s>\n", giveback - rborrow, rborrow);
 		rseek += giveback - rborrow;
 	}
 
@@ -65,29 +60,23 @@ char *RBuffer(char *giveback, size_t min) {
 
 	// Try to satisfy the entire request from the buffer
 	if (rbufok && rseek>=rbufat && rseek+min<rbufat+rbufsize) {
-		//printf("   Satisfied from buffer, returning %p\n", rbuf + (rseek-rbufat));
 		return rborrow = rbuf + (rseek-rbufat);
 	}
-	//printf("   Not satisfied from buffer\n");
 
 	// Instead try to salvage some bytes from the buffer, move them left
 	size_t salvaged = 0;
 	if (rbufok && rbufat+rbufsize > rseek) {
 		salvaged = rbufsize - (rseek - rbufat);
-		//printf("   Salvaging %d bytes\n", salvaged);
 		BlockMove(rbuf + (rseek - rbufat), rbuf, salvaged);
 	}
 
 	// Make an expensive Tread call
 	uint32_t gotten;
-	//printf("   Read9 %d %p %#x %#x\n", rfid, rbuf+salvaged, (long)rseek, rbufsize-salvaged);
 	Read9(rfid, rbuf+salvaged, rseek+salvaged, rbufsize-salvaged, &gotten);
-	//printf("   Got %#x chars\n", gotten);
 	if (salvaged+gotten < rbufsize) rbuf[salvaged+gotten] = 0; // null-term EOF
 
 	rbufok = true;
 	rbufat = rseek;
-	//printf("   Returning %p\n", rbuf);
 	return rborrow = rbuf;
 }
 
