@@ -13,7 +13,7 @@
 void SetRead(uint32_t fid, void *buffer, int32_t buflen);
 void RSeek(int32_t to);
 int32_t RTell(void);
-char *RBuffer(char *giveback, size_t min);
+char *RBuffer(char *giveback, int32_t min);
 
 void SetWrite(uint32_t fid, void *buffer, int32_t buflen);
 int32_t WTell(void);

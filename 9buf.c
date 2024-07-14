@@ -40,7 +40,7 @@ int32_t RTell(void) {
 // "Borrow" a pointer into a contiguous chunk of the buffer, and/or
 // giveback a previously borrowed pointer, plus the number of bytes consumed.
 // (file gets null terminated)
-char *RBuffer(char *giveback, size_t min) {
+char *RBuffer(char *giveback, int32_t min) {
 	// Fast path: plenty of room left in this buffer
 	if (rbufok && giveback && min!=0 && giveback+min <= rbuf+rbufsize) {
 		return giveback;
@@ -63,7 +63,7 @@ char *RBuffer(char *giveback, size_t min) {
 	}
 
 	// Instead try to salvage some bytes from the buffer, move them left
-	size_t salvaged = 0;
+	int32_t salvaged = 0;
 	if (rbufok && rbufat+rbufsize > rseek) {
 		salvaged = rbufsize - (rseek - rbufat);
 		BlockMove(rbuf + (rseek - rbufat), rbuf, salvaged);
