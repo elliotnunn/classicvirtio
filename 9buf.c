@@ -5,7 +5,6 @@
 #include <Memory.h>
 
 #include <stdbool.h>
-#include <string.h> // DELETE THIS once MEMCPY gone
 
 #include "9p.h"
 #include "panic.h"
