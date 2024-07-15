@@ -14,18 +14,17 @@
 /********************************** READING **********************************/
 
 static uint32_t rfid;
-static bool rbufok; // todo: make this redundant with a nonsense rbufat value
 static char *rbuf, *rborrow;
 static int32_t rbufsize;
 static int32_t rbufat, rseek;
 
 void SetRead(uint32_t fid, void *buffer, int32_t buflen) {
 	rfid = fid;
-	rbufok = false;
 	rborrow = NULL;
 	rbuf = buffer;
 	rbufsize = buflen;
-	rbufat = rseek = 0;
+	rseek = 0;
+	rbufat = INT32_MIN; // poison value
 }
 
 void RSeek(int32_t to) {
@@ -42,7 +41,7 @@ int32_t RTell(void) {
 // (file gets null terminated)
 char *RBuffer(char *giveback, int32_t min) {
 	// Fast path: plenty of room left in this buffer
-	if (rbufok && giveback && min!=0 && giveback+min <= rbuf+rbufsize) {
+	if (giveback && min!=0 && giveback+min <= rbuf+rbufsize) {
 		return giveback;
 	}
 
@@ -57,24 +56,39 @@ char *RBuffer(char *giveback, int32_t min) {
 		return rborrow = NULL;
 	}
 
-	// Try to satisfy the entire request from the buffer
-	if (rbufok && rseek>=rbufat && rseek+min<rbufat+rbufsize) {
-		return rborrow = rbuf + (rseek-rbufat);
-	}
+	bool firstByteOK = rbufat<=rseek && rseek<rbufat+rbufsize;
+	bool lastByteOK = rbufat<=rseek+min-1 && rseek+min-1<rbufat+rbufsize;
 
-	// Instead try to salvage some bytes from the buffer, move them left
-	int32_t salvaged = 0;
-	if (rbufok && rbufat+rbufsize > rseek) {
-		salvaged = rbufsize - (rseek - rbufat);
-		BlockMove(rbuf + (rseek - rbufat), rbuf, salvaged);
+	char *getptr;
+	int32_t keep, get, getoffset;
+	if (firstByteOK && lastByteOK) {
+		// Satisfy whole request from buffer
+		return rborrow = rbuf+rseek-rbufat;
+	} else if (firstByteOK) {
+		// Move buffer bytes to lower addresses and repopulate higher addresses
+		keep = rbufat+rbufsize-rseek;
+		get = rseek-rbufat;
+		BlockMoveData(rbuf+get, rbuf, keep);
+		getptr = rbuf+keep;
+		getoffset = rseek+keep;
+	} else if (lastByteOK) {
+		// Move buffer bytes to higher addresses and repopulate lower addresses
+		keep = rseek+rbufsize-rbufat;
+		get = rbufat-rseek;
+		BlockMoveData(rbuf, rbuf+get, keep);
+		getptr = rbuf;
+		getoffset = rseek;
+	} else {
+		get = rbufsize;
+		getptr = rbuf;
+		getoffset = rseek;
 	}
 
 	// Make an expensive Tread call
 	int32_t gotten;
-	Read9(rfid, rbuf+salvaged, rseek+salvaged, rbufsize-salvaged, &gotten);
-	if (salvaged+gotten < rbufsize) rbuf[salvaged+gotten] = 0; // null-term EOF
+	Read9(rfid, getptr, getoffset, get, &gotten);
+	if (gotten < get) getptr[gotten] = 0; // null-term EOF
 
-	rbufok = true;
 	rbufat = rseek;
 	return rborrow = rbuf;
 }
