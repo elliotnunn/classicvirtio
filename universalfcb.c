@@ -33,7 +33,7 @@ static bool refNumValid(short refNum) {
 		(refNum % *(short *)0x3f6) == 2;
 }
 
-OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
+OSErr UnivAllocateFCB(short *fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 	if (fcbFormat9()) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xfe8, 0,
 			fileRefNum, fileCtrlBlockPtr);
@@ -51,7 +51,7 @@ OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 	}
 }
 
-OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
+OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 	if (fcbFormat9()) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xee8, 5,
 			fileRefNum, fileCtrlBlockPtr);
@@ -63,7 +63,7 @@ OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 	}
 }
 
-OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
+OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 	if (fcbFormat9()) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0x3fe8, 4,
 			volCtrlBlockPtr, fileRefNum, fileCtrlBlockPtr);

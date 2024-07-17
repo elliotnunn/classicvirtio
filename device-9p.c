@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Elliot Nunn */
+/* Copyright (c) 2023-2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
 // Driver for virtio-9p under the Macintosh File Manager
@@ -43,10 +43,6 @@
 #define pstrcpy(d, s) memcpy(d, s, 1+(unsigned char)s[0])
 
 #define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1))
-
-// rename some FCB fields for our own use
-#define fcb9Link fcbFlPos
-#define fcb9Opaque fcbExtRec // array totalling to 12 bytes
 
 enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
@@ -758,7 +754,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 	// Determine whether the file is open
 	bool openRF = false, openDF = false;
 	short openAs = 0, refnum = 0;
-	FCBRec *fcb = NULL;
+	struct MyFCB *fcb = NULL;
 	while (UnivIndexFCB(&vcb, &refnum, &fcb) == noErr) {
 		if (fcb->fcbFlNm != cnid) continue;
 
@@ -905,13 +901,13 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 static void updateKnownLength(short refnum, int32_t length) {
 	short fullcircle = refnum;
 	for (;;) {
-		FCBRec *fcb;
+		struct MyFCB *fcb;
 		if (UnivResolveFCB(refnum, &fcb)) panic("FCB linked list broken (RW)");
 
 		fcb->fcbEOF = length;
 		if (fcb->fcbCrPs > length) fcb->fcbCrPs = length;
 
-		refnum = fcb->fcb9Link;
+		refnum = fcb->nextOfSameFile;
 		if (refnum == fullcircle) break;
 	}
 }
@@ -924,7 +920,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	bool rfork = (pb->ioTrap & 0xff) == 0x0a;
 
 	short refn;
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
 
 	int32_t cnid = pbDirID(pb);
@@ -946,13 +942,13 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	MF.GetEOF(opaque, &size);
 	if (size > 0xfffffd00) size = 0xfffffd00;
 
-	*fcb = (struct FCBRec){
+	*fcb = (struct MyFCB){
 		.fcbFlNm = cnid,
 		.fcbFlags =
 			(fcbResourceMask * rfork) |
 			(fcbWriteMask * (pb->ioPermssn != fsRdPerm)),
 		.fcbTypByt = 0, // MFS only
-		.fcb9Link = refn,
+		.nextOfSameFile = refn,
 		.fcbEOF = size,
 		.fcbPLen = (size + 511) & -512,
 		.fcbCrPs = 0,
@@ -960,24 +956,23 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		.fcbBfAdr = NULL, // reserved
 		.fcbClmpSize = 512,
 		.fcbBTCBPtr = NULL, // reserved
-		.fcbCatPos = 0, // own use
 		.fcbDirID = getDBParent(cnid),
 	};
-	memcpy(fcb->fcb9Opaque, opaque, 12); // special private struct
+	memcpy(fcb->pad3, opaque, 12); // special private struct
 	memcpy(&fcb->fcbFType, attr.finfo, 4); // 4char type code
 	mr31name(fcb->fcbCName, getDBName(cnid));
 
 	// Arrange FCBs of the same fork into a circular linked list
 	// Do a linear search for any other same-fork FCB
 	short fellowFile = 0;
-	FCBRec *fellowFCB;
+	struct MyFCB *fellowFCB;
 	while (UnivIndexFCB(&vcb, &fellowFile, &fellowFCB) == noErr) {
 		if (fellowFile == refn) continue; // can't be literally the same FCB
 		if (fellowFCB->fcbFlNm != fcb->fcbFlNm) continue; // must be same CNID
 		if ((fellowFCB->fcbFlags & fcbResourceMask) != (fcb->fcbFlags & fcbResourceMask)) continue; // must be same data/rsrc
 
-		fcb->fcb9Link = fellowFCB->fcb9Link;
-		fellowFCB->fcb9Link = refn;
+		fcb->nextOfSameFile = fellowFCB->nextOfSameFile;
+		fellowFCB->nextOfSameFile = refn;
 		break;
 	}
 
@@ -987,12 +982,12 @@ static OSErr fsOpen(struct HIOParam *pb) {
 }
 
 static OSErr fsGetEOF(struct IOParam *pb) {
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
 	uint64_t size;
-	MF.GetEOF(fcb->fcb9Opaque, &size);
+	MF.GetEOF(fcb->pad3, &size);
 	if (size > 0xfffffd00) size = 0xfffffd00;
 
 	fcb->fcbEOF = size;
@@ -1002,13 +997,13 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 }
 
 static OSErr fsSetEOF(struct IOParam *pb) {
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
 	long len = (uint32_t)pb->ioMisc;
 
-	int err = MF.SetEOF(fcb->fcb9Opaque, len);
+	int err = MF.SetEOF(fcb->pad3, len);
 	if (err) panic("seteof error");
 
 	updateKnownLength(pb->ioRefNum, len);
@@ -1017,24 +1012,24 @@ static OSErr fsSetEOF(struct IOParam *pb) {
 }
 
 static OSErr fsClose(struct IOParam *pb) {
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
 	// Remove this FCB from the linked list of this fork
 	short fellowFile = pb->ioRefNum;
-	FCBRec *fellowFCB;
+	struct MyFCB *fellowFCB;
 	for (;;) {
 		if (UnivResolveFCB(fellowFile, &fellowFCB) != noErr) panic("FCB linked list broken (Close)");
 
-		if (fellowFCB->fcb9Link == pb->ioRefNum) {
-			fellowFCB->fcb9Link = fcb->fcb9Link;
+		if (fellowFCB->nextOfSameFile == pb->ioRefNum) {
+			fellowFCB->nextOfSameFile = fcb->nextOfSameFile;
 			break;
 		}
-		fellowFile = fellowFCB->fcb9Link;
+		fellowFile = fellowFCB->nextOfSameFile;
 	}
 
-	MF.Close(fcb->fcb9Opaque);
+	MF.Close(fcb->pad3);
 
 	fcb->fcbFlNm = 0;
 
@@ -1048,7 +1043,7 @@ static OSErr fsRead(struct IOParam *pb) {
 
 	pb->ioActCount = 0;
 
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
@@ -1070,7 +1065,7 @@ static OSErr fsRead(struct IOParam *pb) {
 	} else if (seek == fsFromLEOF) {
 		// Check the on-disk EOF for concurrent modification
 		uint64_t cursize;
-		MF.GetEOF(fcb->fcb9Opaque, &cursize);
+		MF.GetEOF(fcb->pad3, &cursize);
 		updateKnownLength(pb->ioRefNum, cursize);
 		pos = start = fcb->fcbEOF + pb->ioPosOffset;
 	} else if (seek == fsFromMark) {
@@ -1109,7 +1104,7 @@ static OSErr fsRead(struct IOParam *pb) {
 		}
 
 		uint32_t got = 0;
-		MF.Read(fcb->fcb9Opaque, buf, pos, want, &got);
+		MF.Read(fcb->pad3, buf, pos, want, &got);
 
 		pos += got;
 		if (got != want) break;
@@ -1136,7 +1131,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 
 	pb->ioActCount = 0;
 
-	struct FCBRec *fcb;
+	struct MyFCB *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
@@ -1150,7 +1145,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 	} else if (seek == fsFromLEOF) {
 		// Check the on-disk EOF for concurrent modification
 		uint64_t cursize;
-		MF.GetEOF(fcb->fcb9Opaque, &cursize);
+		MF.GetEOF(fcb->pad3, &cursize);
 		updateKnownLength(pb->ioRefNum, cursize);
 		pos = start = fcb->fcbEOF + pb->ioPosOffset;
 	} else if (seek == fsFromMark) {
@@ -1183,7 +1178,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 		}
 
 		uint32_t got = 0;
-		MF.Write(fcb->fcb9Opaque, buf, pos, want, &got);
+		MF.Write(fcb->pad3, buf, pos, want, &got);
 
 		pos += got;
 		if (got != want) panic("write call incomplete");
@@ -1250,7 +1245,7 @@ static OSErr fsDelete(struct IOParam *pb) {
 
 	// Do not allow removal of open files
 	short openFork = 0;
-	FCBRec *openFCB;
+	struct MyFCB *openFCB;
 	while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
 		if (openFCB->fcbFlNm == cnid) {
 			return fBsyErr;
