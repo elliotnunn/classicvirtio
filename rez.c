@@ -234,11 +234,9 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 	WFlush();
 
 	// Does this strictly need to be a separate call?
-	if (Write9(forkfid, namelist, WTell(), namesize, NULL)) {
+	if (namesize && Write9(forkfid, namelist, WTell(), namesize, NULL)) {
 		panic("failed to write name list");
 	}
-
-	panic("done writing, check it out");
 
 	return 256+contentsize+28+2+8*ntype+12*nres+namesize;
 }
