@@ -54,4 +54,5 @@ static char testStructSize2[sizeof (struct MyFCB)-94];
 
 OSErr UnivAllocateFCB(short *fileRefNum, struct MyFCB **fileCtrlBlockPtr);
 OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr);
+struct MyFCB *UnivMustResolveFCB(short fileRefNum);
 OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, struct MyFCB **fileCtrlBlockPtr);

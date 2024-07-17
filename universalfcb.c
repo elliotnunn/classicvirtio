@@ -6,6 +6,8 @@
 
 #include <stdbool.h>
 
+#include "panic.h"
+
 #include "universalfcb.h"
 
 // Is the Mac OS 9 FCB format in use?
@@ -65,6 +67,13 @@ OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 		*fileCtrlBlockPtr = fcbBase() + fileRefNum;
 		return noErr;
 	}
+}
+
+struct MyFCB *UnivMustResolveFCB(short fileRefNum) {
+	struct MyFCB *ret = NULL;
+	UnivResolveFCB(fileRefNum, &ret);
+	if (ret == NULL) panic("bad refnum passed");
+	return ret;
 }
 
 OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
