@@ -11,6 +11,8 @@
 // Since we are replacing the "UT_" functions, change the FCBRec struct
 // to repurpose some fields for the multifork layer.
 
+// And while we are at it, we do reserve FCB 0 for "fictional use"
+
 #pragma once
 
 #include <FSM.h>

@@ -52,7 +52,11 @@ OSErr UnivAllocateFCB(short *fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 }
 
 OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
-	if (fcbFormat9()) {
+	if (fileRefNum == 0) {
+		static struct MyFCB fake;
+		*fileCtrlBlockPtr = &fake;
+		return noErr;
+	} else if (fcbFormat9()) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xee8, 5,
 			fileRefNum, fileCtrlBlockPtr);
 	} else {
