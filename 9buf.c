@@ -13,6 +13,8 @@
 
 /********************************** READING **********************************/
 
+// Can seek anywhere in a file, and will null-terminate the file
+
 static uint32_t rfid;
 static char *rbuf, *rborrow;
 static int32_t rbufsize;
