@@ -59,6 +59,21 @@ static int init3(void) {
 		if (err && err != EEXIST)  panic("unexpected mkdir err");
 	}
 
+	// Linear-search for a free directory name; TODO: delete stale directories
+	for (uint32_t i=0;; i++) {
+		char name[16];
+		sprintf(name, "%0ld");
+		err = Mkdir9(DIRFID, 0777, 0, name, NULL);
+		if (!err) {
+			if (WalkPath9(DIRFID, DIRFID, name)) {
+				panic("unexpected mkdir-walk err");
+			}
+			break;
+		}
+	}
+
+	// yay, now everything is discardable!
+
 	return 0;
 }
 
