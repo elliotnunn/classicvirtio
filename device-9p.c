@@ -461,60 +461,63 @@ static void getBootBlocks(void) {
 	int32_t cnid = CatalogWalk(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem");
 	if (IsErr(cnid)) return;
 
-	uint64_t opaque[3] = {};
-	int err = MF.Open(opaque, 0 /*unrealisted refnum*/, cnid, FID1, getDBName(cnid), true /*rfork*/, false /*write*/);
-	if (err) return;
+	struct MyFCB *fcb = UnivMustResolveFCB(FAKEREFNUM);
+	fcb->fcbFlNm = cnid;
+	fcb->fcbFlags = fcbResourceMask;
+
+	printf("doing the big open...\n");
+	if (MF.Open(FAKEREFNUM, cnid, FID1, getDBName(cnid))) return;
+	printf("did it, now reading...\n");
 
 	uint32_t content;
-	if (MF.Read(opaque, &content, 0, 4, NULL)) return;
+	if (MF.Read(FAKEREFNUM, &content, 0, 4, NULL)) goto done;
 
 	uint32_t map;
-	if (MF.Read(opaque, &map, 4, 4, NULL)) return;
+	if (MF.Read(FAKEREFNUM, &map, 4, 4, NULL)) goto done;
 
 	uint16_t tloffset; // type list
-	if (MF.Read(opaque, &tloffset, map + 24, 2, NULL)) return;
+	if (MF.Read(FAKEREFNUM, &tloffset, map + 24, 2, NULL)) goto done;
 	uint32_t tl = map + tloffset;
 
 	uint16_t nt;
-	if (MF.Read(opaque, &nt, tl, 2, NULL)) return;
+	if (MF.Read(FAKEREFNUM, &nt, tl, 2, NULL)) goto done;
 	nt++; // ffff means zero types
 
 	for (uint16_t i=0; i<nt; i++) {
 		uint32_t t = tl + 2 + 8*i;
 
 		uint32_t tcode;
-		if (MF.Read(opaque, &tcode, t, 4, NULL)) return;
+		if (MF.Read(FAKEREFNUM, &tcode, t, 4, NULL)) goto done;
 		if (tcode != 'boot') continue;
 
 		uint16_t nr; // n(resources of this type)
 		uint16_t r1; // first resource of this type
-		if (MF.Read(opaque, &nr, t+4, 2, NULL)) return;
-		if (MF.Read(opaque, &r1, t+6, 2, NULL)) return;
+		if (MF.Read(FAKEREFNUM, &nr, t+4, 2, NULL)) goto done;
+		if (MF.Read(FAKEREFNUM, &r1, t+6, 2, NULL)) goto done;
 		nr++; // "0" meant "one resource"
 
 		for (uint16_t j=0; j<nr; j++) {
 			uint32_t r = tl + r1 + 12*j;
 
 			uint16_t id;
-			if (MF.Read(opaque, &id, r, 2, NULL)) return;
+			if (MF.Read(FAKEREFNUM, &id, r, 2, NULL)) goto done;
 			if (id != 1) continue;
 
 			uint32_t off;
-			if (MF.Read(opaque, &off, r+4, 4, NULL)) return;
+			if (MF.Read(FAKEREFNUM, &off, r+4, 4, NULL)) goto done;
 			off &= 0xffffff;
 
 			uint32_t len;
-			if (MF.Read(opaque, &len, content+off, 4, NULL)) return;
+			if (MF.Read(FAKEREFNUM, &len, content+off, 4, NULL)) goto done;
 
 			if (len > 1024) len = 1024;
-			MF.Read(opaque, bootBlocks, content+off+4, len, NULL);
-
-			return; // success
+			MF.Read(FAKEREFNUM, bootBlocks, content+off+4, len, NULL);
+			goto done; // success
 		}
-
-		printf("%d resources of the relevant type\n", nr);
-		panic("ok");
+		goto done; // no boot 3 resource
 	}
+done:
+	// MF.Close(FAKEREFNUM); // might be worth keeping in cache?
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
@@ -914,53 +917,43 @@ static void updateKnownLength(short refnum, int32_t length) {
 
 static OSErr fsOpen(struct HIOParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
-
 	pb->ioRefNum = 0;
-
-	bool rfork = (pb->ioTrap & 0xff) == 0x0a;
 
 	short refn;
 	struct MyFCB *fcb;
 	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
 
 	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
 	if (IsErr(cnid)) return cnid;
 	if (IsDir(cnid)) return fnfErr;
-
-	uint64_t opaque[3] = {};
-	int err = MF.Open(opaque, refn, cnid, FID1, getDBName(cnid), rfork, pb->ioPermssn != fsRdPerm);
-	// no way to tell if we were successful in getting write perms, but the File Manager API permits this
-	if (err == EPERM) return permErr;
-	else if (err == ENOENT) return fnfErr;
-	else if (err) return ioErr;
 
 	struct MFAttr attr = {};
 	MF.FGetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
 
 	uint64_t size;
-	MF.GetEOF(opaque, &size);
+	MF.GetEOF(refn, &size);
 	if (size > 0xfffffd00) size = 0xfffffd00;
 
-	*fcb = (struct MyFCB){
-		.fcbFlNm = cnid,
-		.fcbFlags =
-			(fcbResourceMask * rfork) |
-			(fcbWriteMask * (pb->ioPermssn != fsRdPerm)),
-		.fcbTypByt = 0, // MFS only
-		.nextOfSameFile = refn,
-		.fcbEOF = size,
-		.fcbPLen = (size + 511) & -512,
-		.fcbCrPs = 0,
-		.fcbVPtr = &vcb,
-		.fcbBfAdr = NULL, // reserved
-		.fcbClmpSize = 512,
-		.fcbBTCBPtr = NULL, // reserved
-		.fcbDirID = getDBParent(cnid),
-	};
-	memcpy(fcb->pad3, opaque, 12); // special private struct
+	memset(fcb, 0, sizeof *fcb);
+	fcb->fcbFlNm = cnid;
+	fcb->fcbFlags =
+		(fcbResourceMask * ((pb->ioTrap&0xff)==(_OpenRF&0xff))) |
+		(fcbWriteMask * (pb->ioPermssn != fsRdPerm));
+	fcb->nextOfSameFile = refn;
+	fcb->fcbEOF = size;
+	fcb->fcbPLen = (size + 511) & -512;
+	fcb->fcbVPtr = &vcb;
+	fcb->fcbClmpSize = 512;
+	fcb->fcbDirID = getDBParent(cnid);
 	memcpy(&fcb->fcbFType, attr.finfo, 4); // 4char type code
 	mr31name(fcb->fcbCName, getDBName(cnid));
+
+	int lerr = MF.Open(refn, cnid, FID1, getDBName(cnid));
+	if (lerr) fcb->fcbFlNm = 0; // don't leak an FCB on error
+	if (lerr == EPERM) return permErr;
+	else if (lerr == ENOENT) return fnfErr;
+	else if (lerr) return ioErr;
 
 	// Arrange FCBs of the same fork into a circular linked list
 	// Do a linear search for any other same-fork FCB
@@ -977,7 +970,6 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	}
 
 	pb->ioRefNum = refn;
-
 	return noErr;
 }
 
@@ -987,7 +979,7 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 		return paramErr;
 
 	uint64_t size;
-	MF.GetEOF(fcb->pad3, &size);
+	MF.GetEOF(pb->ioRefNum, &size);
 	if (size > 0xfffffd00) size = 0xfffffd00;
 
 	fcb->fcbEOF = size;
@@ -1003,7 +995,7 @@ static OSErr fsSetEOF(struct IOParam *pb) {
 
 	long len = (uint32_t)pb->ioMisc;
 
-	int err = MF.SetEOF(fcb->pad3, len);
+	int err = MF.SetEOF(pb->ioRefNum, len);
 	if (err) panic("seteof error");
 
 	updateKnownLength(pb->ioRefNum, len);
@@ -1029,7 +1021,7 @@ static OSErr fsClose(struct IOParam *pb) {
 		fellowFile = fellowFCB->nextOfSameFile;
 	}
 
-	MF.Close(fcb->pad3);
+	MF.Close(pb->ioRefNum);
 
 	fcb->fcbFlNm = 0;
 
@@ -1065,7 +1057,7 @@ static OSErr fsRead(struct IOParam *pb) {
 	} else if (seek == fsFromLEOF) {
 		// Check the on-disk EOF for concurrent modification
 		uint64_t cursize;
-		MF.GetEOF(fcb->pad3, &cursize);
+		MF.GetEOF(pb->ioRefNum, &cursize);
 		updateKnownLength(pb->ioRefNum, cursize);
 		pos = start = fcb->fcbEOF + pb->ioPosOffset;
 	} else if (seek == fsFromMark) {
@@ -1104,7 +1096,7 @@ static OSErr fsRead(struct IOParam *pb) {
 		}
 
 		uint32_t got = 0;
-		MF.Read(fcb->pad3, buf, pos, want, &got);
+		MF.Read(pb->ioRefNum, buf, pos, want, &got);
 
 		pos += got;
 		if (got != want) break;
@@ -1145,7 +1137,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 	} else if (seek == fsFromLEOF) {
 		// Check the on-disk EOF for concurrent modification
 		uint64_t cursize;
-		MF.GetEOF(fcb->pad3, &cursize);
+		MF.GetEOF(pb->ioRefNum, &cursize);
 		updateKnownLength(pb->ioRefNum, cursize);
 		pos = start = fcb->fcbEOF + pb->ioPosOffset;
 	} else if (seek == fsFromMark) {
@@ -1178,7 +1170,7 @@ static OSErr fsWrite(struct IOParam *pb) {
 		}
 
 		uint32_t got = 0;
-		MF.Write(fcb->pad3, buf, pos, want, &got);
+		MF.Write(pb->ioRefNum, buf, pos, want, &got);
 
 		pos += got;
 		if (got != want) panic("write call incomplete");
@@ -1336,7 +1328,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 	WalkPath9(FID1, FID1, "..");
 
 	int lerr = MF.Move(FID1, getDBName(cnid1), FID2, getDBName(cnid1));
-	if (lerr == EINVAL) badMovErr;
+	if (lerr == EINVAL) return badMovErr;
 	else if (lerr) return ioErr;
 
 	return noErr;

@@ -37,12 +37,12 @@ void MFChoose(const char *suggest);
 struct MFImpl {
 	const char *Name;
 	int (*Init)(void);
-	int (*Open)(void *opaque, short refnum, int32_t cnid, uint32_t fid, const char *name, bool resfork, bool write);
-	int (*Close)(void *opaque);
-	int (*Read)(void *opaque, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
-	int (*Write)(void *opaque, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
-	int (*GetEOF)(void *opaque, uint64_t *len);
-	int (*SetEOF)(void *opaque, uint64_t len);
+	int (*Open)(short refnum, int32_t cnid, uint32_t fid, const char *name);
+	int (*Close)(short refnum);
+	int (*Read)(short refnum, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
+	int (*Write)(short refnum, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
+	int (*GetEOF)(short refnum, uint64_t *len);
+	int (*SetEOF)(short refnum, uint64_t len);
 	int (*FGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
 	int (*FSetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
 	int (*DGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);

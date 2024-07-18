@@ -54,7 +54,7 @@ OSErr UnivAllocateFCB(short *fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
 }
 
 OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr) {
-	if (fileRefNum == 0) {
+	if (fileRefNum == FAKEREFNUM) {
 		static struct MyFCB fake;
 		*fileCtrlBlockPtr = &fake;
 		return noErr;

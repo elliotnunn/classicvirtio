@@ -17,11 +17,13 @@ Directory metadata is discarded
 
 #include "9buf.h"
 #include "9p.h"
+#include "FSM.h"
 #include "derez.h"
 #include "fids.h"
 #include "panic.h"
 #include "printf.h"
 #include "rez.h"
+#include "universalfcb.h"
 
 #include "multifork.h"
 
@@ -35,14 +37,6 @@ enum {
 	REZFID, // Rez code in a public place
 	FINFOFID,
 	TMPFID,
-	MAXFORK = 0x1100000,
-};
-
-// Per-open-file information hidden inside FCB, maximum 12 bytes
-struct openfile {
-	bool resfork;
-	uint32_t fid;
-	int32_t cnid;
 };
 
 int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt); // borrowed from device-9p.c
@@ -51,6 +45,7 @@ int DeleteSidecar(int32_t cnid, const char *fmt);
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
 static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid);
 static void flushResourceFork(int32_t cnid, uint32_t cachefid);
+static uint32_t fidof(short refnum);
 // no need to prototype init3, open3 etc... they are used once at bottom of file
 
 static int init3(void) {
@@ -67,74 +62,64 @@ static int init3(void) {
 	return 0;
 }
 
-static int open3(void *opaque, short refnum, int32_t cnid, uint32_t fid, const char *name, bool resfork, bool write) {
-	struct openfile *s = opaque;
+static int open3(short refnum, int32_t cnid, uint32_t fid, const char *name) {
+	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
 	int err = 0;
 
-	s->resfork = resfork;
-	s->fid = 32 + refnum;
-	s->cnid = cnid;
-
-	if (!resfork) {
+	if (!(fcb->fcbFlags&fcbResourceMask)) {
 		// Data fork is relatively simple: the file can only be opened if it exists
-		WalkPath9(fid, s->fid, "");
+		WalkPath9(fid, fidof(refnum), "");
 
-		if (write) {
-			err = Lopen9(s->fid, O_RDWR, NULL, NULL);
+		if (fcb->fcbFlags&fcbWriteMask) {
+			err = Lopen9(fidof(refnum), O_RDWR, NULL, NULL);
 			if (err == 0) return 0;
 		}
 
-		err = Lopen9(s->fid, O_RDONLY, NULL, NULL);
+		err = Lopen9(fidof(refnum), O_RDONLY, NULL, NULL);
 		return err;
 	} else {
-		openResourceFork(cnid, fid, name, s->fid);
+		openResourceFork(cnid, fid, name, fidof(refnum));
 		return noErr;
 	}
 }
 
-static int close3(void *opaque) {
-	struct openfile *s = opaque;
+static int close3(short refnum) {
+	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
 
-	if (!s->resfork) {
-		return Clunk9(s->fid);
+	if (!(fcb->fcbFlags&fcbResourceMask)) {
+		return Clunk9(fidof(refnum));
 	} else {
-		flushResourceFork(s->cnid, s->fid);
-		Clunk9(s->fid);
+		flushResourceFork(fcb->fcbFlNm, fidof(refnum));
+		Clunk9(fidof(refnum));
 		return 0;
 	}
 }
 
-static int read3(void *opaque, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
-	struct openfile *s = opaque;
-
-	return Read9(s->fid, buf, offset, count, actual_count);
+static int read3(short refnum, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	return Read9(fidof(refnum), buf, offset, count, actual_count);
 }
 
-static int write3(void *opaque, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
-	struct openfile *s = opaque;
-
-	return Write9(s->fid, buf, offset, count, actual_count);
+static int write3(short refnum, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	return Write9(fidof(refnum), buf, offset, count, actual_count);
 }
 
-static int geteof3(void *opaque, uint64_t *len) {
-	struct openfile *s = opaque;
-
+static int geteof3(short refnum, uint64_t *len) {
 	struct Stat9 stat = {};
-	int err = Getattr9(s->fid, STAT_SIZE, &stat);
+	int err = Getattr9(fidof(refnum), STAT_SIZE, &stat);
 	if (err) return err;
 	*len = stat.size;
 
 	return 0;
 }
 
-static int seteof3(void *opaque, uint64_t len) {
-	struct openfile *s = opaque;
+static int seteof3(short refnum, uint64_t len) {
+	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
 
-	int err = Setattr9(s->fid, SET_SIZE, (struct Stat9){.size=len});
+	int err = Setattr9(fidof(refnum), SET_SIZE, (struct Stat9){.size=len});
 	if (err) return err;
 
-	if (s->resfork) {
-		flushResourceFork(s->cnid, s->fid);
+	if (fcb->fcbFlags&fcbResourceMask) {
+		flushResourceFork(fcb->fcbFlNm, fidof(refnum));
 	}
 
 	return 0;
@@ -419,4 +404,8 @@ static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
 		panic("flushResourceFork setattr");
 
 	Clunk9(REZFID);
+}
+
+static uint32_t fidof(short refnum) {
+	return 32UL + refnum;
 }

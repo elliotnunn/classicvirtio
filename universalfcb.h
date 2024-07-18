@@ -19,6 +19,10 @@
 #include <Types.h>
 #include <stdint.h>
 
+enum {
+	FAKEREFNUM = 0x7ffe, // don't let userland programs see this!
+};
+
 // Fields inside a union are available for multifork use
 struct MyFCB {
 	uint32_t fcbFlNm;            // FCB file number. Non-zero marks FCB used
