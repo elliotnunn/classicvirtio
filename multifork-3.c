@@ -422,7 +422,7 @@ static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 }
 
 static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
-	printf("pushResourceFork %s\n", name);
+	printf("pushResourceFork %s", name);
 	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+16], sidecartmpname[MAXNAME+16];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
@@ -433,9 +433,10 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 		panic("pushResourceFork no fork to see");
 	}
 	struct Stat9 forkstat = {};
-	Getattr9(REZFID, STAT_SIZE, &forkstat);
+	Getattr9(RESFORKFID, STAT_SIZE, &forkstat);
 
 	if (forkstat.size == 0) {
+		printf(" = empty fork\n");
 		// empty "clean" record
 		WalkPath9(DIRFID, CLEANRECFID, "");
 		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {
@@ -445,6 +446,7 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 		WalkPath9(mainfid, TMPFID, "..");
 		Unlinkat9(TMPFID, sidecarname, 0); // no "rdump" file
 	} else {
+		printf(" = full fork\n");
 		WalkPath9(mainfid, REZFID, "..");
 		if (Lcreate9(REZFID, O_WRONLY|O_TRUNC, 0666, 0, sidecartmpname, NULL, NULL)) {
 			panic("unable to create sidecar file");
@@ -468,8 +470,6 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 			panic("failed create rezstat file");
 		}
 		Write9(CLEANRECFID, &scstat, 0, sizeof scstat, NULL);
-
-		Clunk9(RESFORKFID);
 		Clunk9(CLEANRECFID);
 	}
 }
