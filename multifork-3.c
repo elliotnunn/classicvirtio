@@ -61,8 +61,8 @@ static int init3(void) {
 
 	// Linear-search for a free directory name; TODO: delete stale directories
 	for (uint32_t i=0;; i++) {
-		char name[16];
-		sprintf(name, "%0ld");
+		char name[MAXNAME];
+		sprintf(name, "%ld", i);
 		err = Mkdir9(DIRFID, 0777, 0, name, NULL);
 		if (!err) {
 			if (WalkPath9(DIRFID, DIRFID, name)) {
@@ -104,7 +104,7 @@ static int open3(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name
 static int close3(struct MyFCB *fcb) {
 	if ((fcb->fcbFlags&fcbResourceMask) && (fcb->mfFlags&DIRTYFLAG)) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
-			i->mfFlags &= ~DIRTYFLAG;
+			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
 		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
 	}
@@ -119,7 +119,7 @@ static int read3(struct MyFCB *fcb, void *buf, uint64_t offset, uint32_t count, 
 static int write3(struct MyFCB *fcb, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	if ((fcb->fcbFlags & fcbResourceMask) && !(fcb->mfFlags & DIRTYFLAG)) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
-			i->mfFlags |= DIRTYFLAG;
+			i->mfFlags |= DIRTYFLAG; // set it
 		}
 	}
 	return Write9(fidof(fcb), buf, offset, count, actual_count);
@@ -138,13 +138,14 @@ static int seteof3(struct MyFCB *fcb, uint64_t len) {
 	int err = Setattr9(fidof(fcb), SET_SIZE, (struct Stat9){.size=len});
 	if (err) return err;
 
-	if ((fcb->fcbFlags&fcbResourceMask) && (fcb->mfFlags&DIRTYFLAG)) {
+	// Take this as a promise that a resource file is consistent,
+	// and an opportunity to write it out
+	if ((fcb->fcbFlags&fcbResourceMask) && ((fcb->mfFlags&DIRTYFLAG) || len==0)) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
-			i->mfFlags &= ~DIRTYFLAG;
+			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
 		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
 	}
-
 	return 0;
 }
 
@@ -304,39 +305,54 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	// Delightfully quick case
 	struct MyFCB *alreadyopen = UnivFirst(cnid, true);
 	if (alreadyopen) {
+		printf("resource fork cache authoritative because open\n");
 		Getattr9(fidof(alreadyopen), STAT_SIZE|STAT_MTIME, stat);
 		return;
 	}
 
-	char forkname[9], rsname[15], sidecarname[MAXNAME+12];
+	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+12];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
 	sprintf(sidecarname, "../%s.rdump", name);
 
 	if (WalkPath9(DIRFID, CLEANRECFID, rsname)) {
+		printf("(because no -rezstat file) ");
 		pullResourceFork(cnid, mainfid, name, stat);
 		return;
 	}
 
 	struct Stat9 expect = {};
-	bool emptyrf = Read9(CLEANRECFID, &expect, 0, sizeof expect, NULL) != 0;
+	if (Lopen9(CLEANRECFID, O_RDONLY, NULL, NULL)) {
+		panic("could not open existing -rezstat");
+	}
+	uint64_t statfilesize = 0;
+	Read9(CLEANRECFID, &expect, 0, sizeof expect, &statfilesize);
 	Clunk9(CLEANRECFID);
 
 	bool nosidecar = WalkPath9(mainfid, REZFID, sidecarname) != 0;
-	if (emptyrf && nosidecar) {
-		memset(stat, 0, sizeof *stat); // no resource fork
+	if (statfilesize==0 && nosidecar) {
+		printf("resource fork cache agreed empty\n");
+		memset(stat, 0, sizeof *stat); // agree, empty resource fork
 		return;
-	} else if (emptyrf || nosidecar) {
+	} else if (statfilesize==0) {
+		printf("(because rdump newly created) ");
+		pullResourceFork(cnid, mainfid, name, stat);
+		return;
+	} else if (nosidecar) {
+		printf("(because sidecar newly deleted) ");
 		pullResourceFork(cnid, mainfid, name, stat);
 		return;
 	}
 
 	struct Stat9 scstat = {};
 	Getattr9(REZFID, STAT_SIZE|STAT_MTIME, &scstat);
-	if (memcmp(&scstat, &expect, sizeof expect)) {
+	if (scstat.size!=expect.size || scstat.mtime_sec!=expect.mtime_sec || scstat.mtime_nsec!=expect.mtime_nsec) {
+		printf("(because of stat mismatch) ");
 		pullResourceFork(cnid, mainfid, name, stat);
 		return;
 	}
+
+	printf("resource fork cache up to date\n");
 
 	// actually we are up to date, which is nice
 	WalkPath9(DIRFID, RESFORKFID, forkname);
@@ -346,7 +362,8 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 }
 
 static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
-	char forkname[9], rsname[15], sidecarname[MAXNAME+12];
+	printf("pullResourceFork\n");
+	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+12];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
 	sprintf(sidecarname, "../%s.rdump", name);
@@ -398,7 +415,8 @@ static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 }
 
 static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
-	char forkname[9], rsname[15], sidecarname[MAXNAME+16];
+	printf("pushResourceFork %s\n", name);
+	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+16];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
 	sprintf(sidecarname, "../%s.rdump.tmp", name);
@@ -410,7 +428,12 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 	Getattr9(REZFID, STAT_SIZE, &forkstat);
 
 	if (forkstat.size == 0) {
-		Unlinkat9(DIRFID, rsname, 0); // no "clean" record
+		// empty "clean" record
+		WalkPath9(DIRFID, CLEANRECFID, "");
+		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {
+			panic("failed create rezstat file");
+		}
+		Clunk9(CLEANRECFID);
 		Unlinkat9(mainfid, sidecarname, 0); // no "rdump" file
 	} else {
 		WalkPath9(mainfid, REZFID, "");
