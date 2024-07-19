@@ -39,6 +39,7 @@ enum {
 	REZFID, // Rez code in a public place
 	FINFOFID,
 	TMPFID,
+	MAINFID,
 	DIRTYFLAG = 1,
 };
 
@@ -106,7 +107,10 @@ static int close3(struct MyFCB *fcb) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
-		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
+		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, ""))) {
+			panic("CatalogWalk failed!");
+		}
+		pushResourceFork(fcb->fcbFlNm, MAINFID, getDBName(fcb->fcbFlNm));
 	}
 
 	return Clunk9(fidof(fcb));
@@ -144,7 +148,10 @@ static int seteof3(struct MyFCB *fcb, uint64_t len) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
-		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
+		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, ""))) {
+			panic("CatalogWalk failed!");
+		}
+		pushResourceFork(fcb->fcbFlNm, MAINFID, getDBName(fcb->fcbFlNm));
 	}
 	return 0;
 }
@@ -325,7 +332,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	if (Lopen9(CLEANRECFID, O_RDONLY, NULL, NULL)) {
 		panic("could not open existing -rezstat");
 	}
-	uint64_t statfilesize = 0;
+	uint32_t statfilesize = 0;
 	Read9(CLEANRECFID, &expect, 0, sizeof expect, &statfilesize);
 	Clunk9(CLEANRECFID);
 
@@ -416,10 +423,11 @@ static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 
 static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 	printf("pushResourceFork %s\n", name);
-	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+16];
+	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+16], sidecartmpname[MAXNAME+16];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
-	sprintf(sidecarname, "../%s.rdump.tmp", name);
+	sprintf(sidecarname, "%s.rdump", name);
+	sprintf(sidecartmpname, "%s.rdump.tmp", name);
 
 	if (WalkPath9(DIRFID, RESFORKFID, forkname)) {
 		panic("pushResourceFork no fork to see");
@@ -434,10 +442,11 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 			panic("failed create rezstat file");
 		}
 		Clunk9(CLEANRECFID);
-		Unlinkat9(mainfid, sidecarname, 0); // no "rdump" file
+		WalkPath9(mainfid, TMPFID, "..");
+		Unlinkat9(TMPFID, sidecarname, 0); // no "rdump" file
 	} else {
-		WalkPath9(mainfid, REZFID, "");
-		if (!Lcreate9(REZFID, O_WRONLY|O_TRUNC, 0666, 0, sidecarname, NULL, NULL)) {
+		WalkPath9(mainfid, REZFID, "..");
+		if (Lcreate9(REZFID, O_WRONLY|O_TRUNC, 0666, 0, sidecartmpname, NULL, NULL)) {
 			panic("unable to create sidecar file");
 		}
 		Lopen9(RESFORKFID, O_RDONLY, NULL, NULL);
