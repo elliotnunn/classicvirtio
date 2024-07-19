@@ -84,7 +84,7 @@ static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static bool visName(const char *name);
-int32_t mactime(int64_t unixtime);
+static int32_t mactime(int64_t unixtime);
 static long fsCall(void *pb, long selector);
 static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
@@ -1560,7 +1560,7 @@ static bool visName(const char *name) {
 	return (name[0] != '.' && !MF.IsSidecar(name));
 }
 
-int32_t mactime(int64_t unixtime) {
+static int32_t mactime(int64_t unixtime) {
 	struct MachineLocation loc;
 	ReadLocation(&loc);
 	int32_t tz = loc.u.gmtDelta & 0xffffff;
