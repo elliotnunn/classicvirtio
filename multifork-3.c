@@ -102,18 +102,14 @@ static int open3(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name
 }
 
 static int close3(struct MyFCB *fcb) {
-	if (!(fcb->fcbFlags&fcbResourceMask)) {
-		return Clunk9(fidof(fcb));
-	} else {
-		if (fcb->mfFlags & DIRTYFLAG) {
-			for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
-				i->mfFlags &= ~DIRTYFLAG;
-			}
-			pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
+	if ((fcb->fcbFlags&fcbResourceMask) && (fcb->mfFlags&DIRTYFLAG)) {
+		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
+			i->mfFlags &= ~DIRTYFLAG;
 		}
-		Clunk9(fidof(fcb));
-		return 0;
+		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
 	}
+
+	return Clunk9(fidof(fcb));
 }
 
 static int read3(struct MyFCB *fcb, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
