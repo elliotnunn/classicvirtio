@@ -148,13 +148,13 @@ uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
 
 		if (rezBody()) panic("failed to read Rez body");
 
+		uint32_t bodylen = WTell() - lenheaderpos - 4;
+		Rewrite(&bodylen, lenheaderpos, 4);
+
 		int padby = 3 & ~(WTell()-1);
 		b = WBuffer(NULL, padby);
 		for (int i=0; i<padby; i++) *b++ = 0;
 		WBuffer(b, 0);
-
-		uint32_t bodylen = WTell() - lenheaderpos - 4;
-		Rewrite(&bodylen, lenheaderpos, 4);
 
 		// append the name to the packed name list
 		if (hasname) {
