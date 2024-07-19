@@ -22,7 +22,6 @@
 
 #include "universalfcb.h"
 
-struct MyFCB *traverse(short search, short toofar, uint32_t cnid, bool resfork);
 static int os9Format(void);
 static void *fcbBase(void);
 static bool refNumValid(short refNum);
@@ -123,25 +122,44 @@ struct MyFCB *UnivFirst(uint32_t cnid, bool resfork) {
 	int key = hash(cnid, resfork);
 	if (lists[key] == 0) {
 		return NULL;
-	} else {
-		return traverse(lists[key], lists[key], cnid, resfork);
 	}
-}
 
-struct MyFCB *UnivNext(struct MyFCB *fcb) {
-	int key = hash(fcb->fcbFlNm, fcb->fcbFlags&fcbResourceMask);
-	return traverse(fcb->right, lists[key], fcb->fcbFlNm, fcb->fcbFlags&fcbResourceMask);
-}
-
-struct MyFCB *traverse(short search, short toofar, uint32_t cnid, bool resfork) {
-	do {
+	short search = lists[key];
+	for (;;) {
 		struct MyFCB *fcb = UnivMustGetFCB(search);
 		if (fcb->fcbFlNm==cnid && !!(fcb->fcbFlags&fcbResourceMask)==resfork) {
 			return fcb;
 		}
+
 		search = fcb->right;
-	} while (search != toofar);
-	return NULL;
+		if (search == lists[key]) {
+			return NULL; // only one in the list, and it doesn't match
+		}
+	}
+}
+
+struct MyFCB *UnivNext(struct MyFCB *fcb) {
+	uint32_t cnid = fcb->fcbFlNm;
+	bool resfork = fcb->fcbFlags&fcbResourceMask ;
+
+	int key = hash(cnid, resfork);
+	if (lists[key] == 0) {
+		panic("UnivNext on unlisted FCB");
+	}
+
+	short search = lists[key];
+	for (;;) {
+		short search = fcb->right;
+		fcb = UnivMustGetFCB(search);
+
+		if (search == lists[key]) {
+			return NULL; // circled to the start of the list
+		}
+
+		if (fcb->fcbFlNm==cnid && !!(fcb->fcbFlags&fcbResourceMask)==resfork) {
+			return fcb;
+		}
+	}
 }
 
 // Is the Mac OS 9 FCB format in use?
