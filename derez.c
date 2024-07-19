@@ -264,5 +264,4 @@ static void derezFullLine(char *dest, char *src) {
 	*dest++ = '*';
 	*dest++ = '/';
 	*dest++ = '\n';
-	return dest;
 }
