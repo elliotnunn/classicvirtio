@@ -29,6 +29,7 @@ struct MyFCB {
 	void *fcbBfAdr;              // File's buffer address
 	union {
 		char pad2[2];
+		char mfFlags;
 	};
 	uint32_t fcbClmpSize;        // Number of bytes per clump
 	void *fcbBTCBPtr;            // Pointer to B*-Tree control block for file

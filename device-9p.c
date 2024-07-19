@@ -1339,49 +1339,6 @@ static OSErr fsCloseWD(struct WDParam *pb) {
 	return noErr;
 }
 
-// Shabby little hack that might turn into something good
-// flags == 0 means don't open, just navigate
-int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt) {
-	int err;
-
-	err = CatalogWalk(fid, cnid, "");
-	if (err < 0) return ENOENT;
-
-	WalkPath9(fid, fid, "..");
-
-	char sidename[MAXNAME]; // like file.rdump or ._file
-	sprintf(sidename, fmt, getDBName(cnid));
-
-	// Squalid raciness
-	err = WalkPath9(fid, fid, sidename);
-	if (flags == 0) return err;
-
-	if (err) goto trycreate;
-
-	err = Lopen9(fid, flags, NULL, NULL);
-	return err;
-
-trycreate:
-	// Should we be doing a dance to avoid a create-open race?
-	err = Lcreate9(fid, flags, 0666, 0, sidename, NULL, NULL);
-	return err;
-}
-
-int DeleteSidecar(int32_t cnid, const char *fmt) {
-	int err;
-
-	err = CatalogWalk(FID1, cnid, "");
-	if (err < 0) return ENOENT;
-
-	WalkPath9(FID1, FID1, "..");
-
-	char sidename[MAXNAME]; // like file.rdump or ._file
-	sprintf(sidename, fmt, getDBName(cnid));
-
-	Unlinkat9(FID1, sidename, 0);
-	return 0;
-}
-
 // Divine the meaning of ioVRefNum and ioDirID
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;

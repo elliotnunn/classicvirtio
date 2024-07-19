@@ -18,6 +18,7 @@ Directory metadata is discarded
 #include "9buf.h"
 #include "9p.h"
 #include "FSM.h"
+#include "catalog.h"
 #include "derez.h"
 #include "fids.h"
 #include "panic.h"
@@ -34,17 +35,16 @@ Directory metadata is discarded
 enum {
 	DIRFID = FIRSTFID_MULTIFORK,
 	RESFORKFID, // actual resource formatted file in a hidden place
+	CLEANRECFID,
 	REZFID, // Rez code in a public place
 	FINFOFID,
 	TMPFID,
+	DIRTYFLAG = 1,
 };
 
-int OpenSidecar(uint32_t fid, int32_t cnid, int flags, const char *fmt); // borrowed from device-9p.c
-int DeleteSidecar(int32_t cnid, const char *fmt);
-
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
-static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid);
-static void flushResourceFork(int32_t cnid, uint32_t cachefid);
+static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
+static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name);
 static uint32_t fidof(struct MyFCB *fcb);
 // no need to prototype init3, open3 etc... they are used once at bottom of file
 
@@ -79,28 +79,38 @@ static int init3(void) {
 
 static int open3(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name) {
 	int err = 0;
-	if (!(fcb->fcbFlags&fcbResourceMask)) {
+	if (fcb->fcbFlags&fcbResourceMask) {
+		struct Stat9 junk;
+		statResourceFork(cnid, fid, name, &junk);
+
+		char path[9];
+		sprintf(path, "%08x", cnid);
+		if (WalkPath9(DIRFID, fidof(fcb), path)) {
+			panic("could not open even a stattable res fork");
+		}
+	} else {
 		// Data fork is relatively simple: the file can only be opened if it exists
 		WalkPath9(fid, fidof(fcb), "");
-
-		if (fcb->fcbFlags&fcbWriteMask) {
-			err = Lopen9(fidof(fcb), O_RDWR, NULL, NULL);
-			if (err == 0) return 0;
-		}
-
-		err = Lopen9(fidof(fcb), O_RDONLY, NULL, NULL);
-		return err;
-	} else {
-		openResourceFork(cnid, fid, name, fidof(fcb));
-		return noErr;
 	}
+
+	if (fcb->fcbFlags&fcbWriteMask) {
+		err = Lopen9(fidof(fcb), O_RDWR, NULL, NULL);
+		if (err == 0) return 0;
+	}
+	err = Lopen9(fidof(fcb), O_RDONLY, NULL, NULL);
+	return err;
 }
 
 static int close3(struct MyFCB *fcb) {
 	if (!(fcb->fcbFlags&fcbResourceMask)) {
 		return Clunk9(fidof(fcb));
 	} else {
-		flushResourceFork(fcb->fcbFlNm, fidof(fcb));
+		if (fcb->mfFlags & DIRTYFLAG) {
+			for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
+				i->mfFlags &= ~DIRTYFLAG;
+			}
+			pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
+		}
 		Clunk9(fidof(fcb));
 		return 0;
 	}
@@ -111,6 +121,11 @@ static int read3(struct MyFCB *fcb, void *buf, uint64_t offset, uint32_t count, 
 }
 
 static int write3(struct MyFCB *fcb, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	if ((fcb->fcbFlags & fcbResourceMask) && !(fcb->mfFlags & DIRTYFLAG)) {
+		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
+			i->mfFlags |= DIRTYFLAG;
+		}
+	}
 	return Write9(fidof(fcb), buf, offset, count, actual_count);
 }
 
@@ -127,8 +142,11 @@ static int seteof3(struct MyFCB *fcb, uint64_t len) {
 	int err = Setattr9(fidof(fcb), SET_SIZE, (struct Stat9){.size=len});
 	if (err) return err;
 
-	if (fcb->fcbFlags&fcbResourceMask) {
-		flushResourceFork(fcb->fcbFlNm, fidof(fcb));
+	if ((fcb->fcbFlags&fcbResourceMask) && (fcb->mfFlags&DIRTYFLAG)) {
+		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
+			i->mfFlags &= ~DIRTYFLAG;
+		}
+		pushResourceFork(fcb->fcbFlNm, fidof(fcb), getDBName(fcb->fcbFlNm));
 	}
 
 	return 0;
@@ -256,6 +274,7 @@ static int del3(uint32_t fid, const char *name, bool isdir) {
 
 static bool issidecar3(const char *name) {
 	int len = strlen(name);
+	if (len >= 10 && !strcmp(name+len-10, ".rdump.tmp")) return true;
 	if (len >= 6 && !strcmp(name+len-6, ".rdump")) return true;
 	if (len >= 6 && !strcmp(name+len-6, ".idump")) return true;
 
@@ -281,138 +300,150 @@ struct MFImpl MF3 = {
 };
 
 // This function is idempotent. It brings the cached resource fork up to date and stats it.
-// Nothing is left open upon return.
-
-// For posterity: while writing this code I gave up on writing atomic AND consistent 9P calls,
-// and decided to implement the "conch" system.
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
 	int err;
 
-// 	printf("statResourceFork cnid=%08x mainfid=%d name=%s\n", cnid, mainfid, name);
+	// printf("statResourceFork cnid=%08x mainfid=%d name=%s\n", cnid, mainfid, name);
 
-	bool sidecarExists = false; // if so, it will be open read-only at REZFID
-	bool cacheExists = false;
-	struct Stat9 sidecarStat, cacheStat;
-
-	// Navigate to the sidecar file (.rdump), check for existence, get mtime (if applicable), don't open
-	char rpath[MAXNAME];
-	sprintf(rpath, "../%s.rdump", name);
-	err = WalkPath9(mainfid, REZFID, rpath);
-	if (!err) {
-		if (Getattr9(REZFID, STAT_MTIME|STAT_SIZE, &sidecarStat))
-			panic("failed stat sidecar");
-		sidecarExists = true;
+	// Delightfully quick case
+	struct MyFCB *alreadyopen = UnivFirst(cnid, true);
+	if (alreadyopen) {
+		Getattr9(fidof(alreadyopen), STAT_SIZE|STAT_MTIME, stat);
+		return;
 	}
 
-	// Navigate to the hidden cache file, check for existence, get mtime (if applicable), don't open
-	char cachename[12]; // enough room to append .tmp also
-	sprintf(cachename, "%08x", cnid);
-	if (!WalkPath9(DIRFID, RESFORKFID, cachename)) {
-		if (Getattr9(RESFORKFID, STAT_MTIME|STAT_SIZE, &cacheStat))
-			panic("failed stat extant res cache");
-		cacheExists = true;
+	char forkname[9], rsname[15], sidecarname[MAXNAME+12];
+	sprintf(forkname, "%08lx", cnid);
+	sprintf(rsname, "%08lx-rezstat", cnid);
+	sprintf(sidecarname, "../%s.rdump", name);
+
+	if (WalkPath9(DIRFID, CLEANRECFID, rsname)) {
+		pullResourceFork(cnid, mainfid, name, stat);
+		return;
 	}
 
-	// Simple case: is a costly parse needed?
-// 	printf("rdump file: exists=%d mtime=%08lx%08lx.%08lx\n",
-// 		sidecarExists, (long)(sidecarStat.mtime_sec >> 32), (long)sidecarStat.mtime_sec, (long)sidecarStat.mtime_nsec);
-// 	printf("cache file: exists=%d mtime=%08lx%08lx.%08lx\n",
-// 		cacheExists, (long)(cacheStat.mtime_sec >> 32), (long)cacheStat.mtime_sec, (long)cacheStat.mtime_nsec);
+	struct Stat9 expect = {};
+	bool emptyrf = Read9(CLEANRECFID, &expect, 0, sizeof expect, NULL) != 0;
+	Clunk9(CLEANRECFID);
 
-	char tmpname[16];
-	sprintf(tmpname, "%08x.tmp", cnid);
+	bool nosidecar = WalkPath9(mainfid, REZFID, sidecarname) != 0;
+	if (emptyrf && nosidecar) {
+		memset(stat, 0, sizeof *stat); // no resource fork
+		return;
+	} else if (emptyrf || nosidecar) {
+		pullResourceFork(cnid, mainfid, name, stat);
+		return;
+	}
 
-	if (sidecarExists) {
-		if (!cacheExists ||
-			sidecarStat.mtime_sec>cacheStat.mtime_sec ||
-			sidecarStat.mtime_sec==cacheStat.mtime_sec && sidecarStat.mtime_nsec>cacheStat.mtime_nsec
-		) {
-// 			printf("... cache stale or nonexistent, doing a costly parse ...\n");
+	struct Stat9 scstat = {};
+	Getattr9(REZFID, STAT_SIZE|STAT_MTIME, &scstat);
+	if (memcmp(&scstat, &expect, sizeof expect)) {
+		pullResourceFork(cnid, mainfid, name, stat);
+		return;
+	}
 
-			WalkPath9(DIRFID, RESFORKFID, "");
-			if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, tmpname, NULL, NULL))
-				panic("failed create new res cache");
-			if (Lopen9(REZFID, O_RDONLY, NULL, NULL))
-				panic("failed open extant sidecar");
+	// actually we are up to date, which is nice
+	WalkPath9(DIRFID, RESFORKFID, forkname);
+	Getattr9(RESFORKFID, STAT_SIZE, stat);
+	stat->mtime_sec = expect.mtime_sec;
+	stat->mtime_nsec = expect.mtime_nsec;
+}
 
-			uint32_t size = Rez(REZFID, RESFORKFID);
-			Clunk9(REZFID);
-			Clunk9(RESFORKFID);
+static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
+	char forkname[9], rsname[15], sidecarname[MAXNAME+12];
+	sprintf(forkname, "%08lx", cnid);
+	sprintf(rsname, "%08lx-rezstat", cnid);
+	sprintf(sidecarname, "../%s.rdump", name);
 
-			if (WalkPath9(DIRFID, RESFORKFID, tmpname))
-				panic("failed walk new tmp res cache");
-			if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, sidecarStat))
-				panic("failed setmtime res cache");
-			Clunk9(RESFORKFID);
+	bool empty = WalkPath9(mainfid, REZFID, sidecarname);
 
-			if (Renameat9(DIRFID, tmpname, DIRFID, cachename))
-				panic("failed rename res cache");
-
-			stat->size = size;
-			stat->mtime_sec = sidecarStat.mtime_sec;
-			stat->mtime_nsec = sidecarStat.mtime_nsec;
-		} else {
-// 			printf("... cache is already in date, doing nothing\n");
-
-			stat->size = cacheStat.size;
-			stat->mtime_sec = cacheStat.mtime_sec;
-			stat->mtime_nsec = cacheStat.mtime_nsec;
-		}
-	} else {
-		// sidecar nonexistent: make an empty resfork cache file,
-		// but make its mtime far in the past, not to pollute the overall file's mtime
+	if (empty) {
 		WalkPath9(DIRFID, RESFORKFID, "");
-		if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, cachename, NULL, NULL))
-			panic("failed create empty res cache");
-		if (Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, (struct Stat9){.mtime_sec=0, .mtime_nsec=0}))
-			panic("failed setmtime empty res cache");
+		Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, forkname, NULL, NULL);
 		Clunk9(RESFORKFID);
-	}
-}
 
-static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid) {
-	struct Stat9 stat;
-	statResourceFork(cnid, mainfid, name, &stat);
+		// empty cleanrecfid
+		WalkPath9(DIRFID, CLEANRECFID, "");
+		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {
+			panic("failed create empty rezstat file");
+		}
+		Clunk9(CLEANRECFID);
 
-	char cachename[MAXNAME];
-	sprintf(cachename, "%08x", cnid);
-	if (WalkPath9(DIRFID, cachefid, cachename))
-		panic("failed walk extant res cache");
-	if (Lopen9(cachefid, O_RDWR, NULL, NULL))
-		panic("failed open extant res cache");
-}
+		memset(stat, 0, sizeof *stat);
+	} else {
+		struct Stat9 scstat = {};
+		Getattr9(REZFID, STAT_MTIME|STAT_SIZE, &scstat);
+		if (Lopen9(REZFID, O_RDONLY, NULL, NULL)) {
+			panic("failed open extant sidecar");
+		}
 
-static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
-	struct Stat9 cachetime;
-	if (Getattr9(cachefid, STAT_MTIME|STAT_SIZE, &cachetime))
-		panic("flushResourceFork getattr cachefid");
+		WalkPath9(DIRFID, RESFORKFID, "");
+		if (Lcreate9(RESFORKFID, O_WRONLY|O_TRUNC, 0666, 0, forkname, NULL, NULL)) {
+			panic("failed create rf cache");
+		}
 
-	if (cachetime.size == 0) {
-		DeleteSidecar(cnid, "%s.rdump");
-		// problem: the file's mtime won't be updated
-		return;
-	}
+		uint32_t size = Rez(REZFID, RESFORKFID);
+		Setattr9(RESFORKFID, SET_MTIME|SET_MTIME_SET, scstat);
 
-	// not atomic, needs a rethink
-	if (OpenSidecar(REZFID, cnid, O_WRONLY|O_CREAT|O_TRUNC, "%s.rdump"))
-		panic("failed OpenSidecar for writeout");
+		WalkPath9(DIRFID, CLEANRECFID, "");
+		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {
+			panic("failed create rezstat file");
+		}
+		Write9(CLEANRECFID, &scstat, 0, sizeof scstat, NULL);
 
-	struct Stat9 sidecartime;
-	if (Getattr9(REZFID, STAT_MTIME, &sidecartime))
-		panic("flushResourceFork getattr REZFID");
-
-	if (cachetime.mtime_sec==sidecartime.mtime_sec && cachetime.mtime_nsec==sidecartime.mtime_nsec) {
 		Clunk9(REZFID);
-		return;
+		Clunk9(RESFORKFID);
+		Clunk9(CLEANRECFID);
+
+		stat->size = size;
+		stat->mtime_sec = scstat.mtime_sec;
+		stat->mtime_nsec = scstat.mtime_nsec;
 	}
+}
 
+static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
+	char forkname[9], rsname[15], sidecarname[MAXNAME+16];
+	sprintf(forkname, "%08lx", cnid);
+	sprintf(rsname, "%08lx-rezstat", cnid);
+	sprintf(sidecarname, "../%s.rdump.tmp", name);
 
-	DeRez(cachefid, REZFID);
+	if (WalkPath9(DIRFID, RESFORKFID, forkname)) {
+		panic("pushResourceFork no fork to see");
+	}
+	struct Stat9 forkstat = {};
+	Getattr9(REZFID, STAT_SIZE, &forkstat);
 
-	if (Setattr9(REZFID, SET_MTIME|SET_MTIME_SET, cachetime))
-		panic("flushResourceFork setattr");
+	if (forkstat.size == 0) {
+		Unlinkat9(DIRFID, rsname, 0); // no "clean" record
+		Unlinkat9(mainfid, sidecarname, 0); // no "rdump" file
+	} else {
+		WalkPath9(mainfid, REZFID, "");
+		if (!Lcreate9(REZFID, O_WRONLY|O_TRUNC, 0666, 0, sidecarname, NULL, NULL)) {
+			panic("unable to create sidecar file");
+		}
+		Lopen9(RESFORKFID, O_RDONLY, NULL, NULL);
 
-	Clunk9(REZFID);
+		DeRez(RESFORKFID, REZFID);
+		struct Stat9 scstat = {};
+		Getattr9(REZFID, STAT_SIZE|STAT_MTIME, &scstat);
+		Clunk9(REZFID);
+		Clunk9(RESFORKFID);
+
+		char n1[MAXNAME+16], n2[MAXNAME+16];
+		sprintf(n1, "../%s.rdump.tmp", name);
+		sprintf(n2, "../%s.rdump", name);
+		WalkPath9(mainfid, TMPFID, "..");
+		Renameat9(TMPFID, n1, TMPFID, n2);
+
+		WalkPath9(DIRFID, CLEANRECFID, "");
+		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {
+			panic("failed create rezstat file");
+		}
+		Write9(CLEANRECFID, &scstat, 0, sizeof scstat, NULL);
+
+		Clunk9(RESFORKFID);
+		Clunk9(CLEANRECFID);
+	}
 }
 
 static uint32_t fidof(struct MyFCB *fcb) {
