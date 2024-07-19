@@ -458,8 +458,8 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 		Clunk9(RESFORKFID);
 
 		char n1[MAXNAME+16], n2[MAXNAME+16];
-		sprintf(n1, "../%s.rdump.tmp", name);
-		sprintf(n2, "../%s.rdump", name);
+		sprintf(n1, "%s.rdump.tmp", name);
+		sprintf(n2, "%s.rdump", name);
 		WalkPath9(mainfid, TMPFID, "..");
 		Renameat9(TMPFID, n1, TMPFID, n2);
 
