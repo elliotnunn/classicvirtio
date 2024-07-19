@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Elliot Nunn */
+/* Copyright (c) 2023-2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
 #pragma once
@@ -11,7 +11,9 @@
 // one challenge is to make an opaque struct available to all MF implementations
 
 #include <stdbool.h>
-#include <stdint.h>
+#include <stdbool.h>
+
+#include "universalfcb.h"
 
 // Field select
 enum {
@@ -37,12 +39,12 @@ void MFChoose(const char *suggest);
 struct MFImpl {
 	const char *Name;
 	int (*Init)(void);
-	int (*Open)(short refnum, int32_t cnid, uint32_t fid, const char *name);
-	int (*Close)(short refnum);
-	int (*Read)(short refnum, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
-	int (*Write)(short refnum, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
-	int (*GetEOF)(short refnum, uint64_t *len);
-	int (*SetEOF)(short refnum, uint64_t len);
+	int (*Open)(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name);
+	int (*Close)(struct MyFCB *fcb);
+	int (*Read)(struct MyFCB *fcb, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
+	int (*Write)(struct MyFCB *fcb, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
+	int (*GetEOF)(struct MyFCB *fcb, uint64_t *len);
+	int (*SetEOF)(struct MyFCB *fcb, uint64_t len);
 	int (*FGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);
 	int (*FSetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, const struct MFAttr *attr);
 	int (*DGetAttr)(int32_t cnid, uint32_t fid, const char *name, unsigned fields, struct MFAttr *attr);

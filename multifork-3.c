@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Elliot Nunn */
+/* Copyright (c) 2023-2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
 /*
@@ -45,7 +45,7 @@ int DeleteSidecar(int32_t cnid, const char *fmt);
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
 static void openResourceFork(int32_t cnid, uint32_t mainfid, const char *name, uint32_t cachefid);
 static void flushResourceFork(int32_t cnid, uint32_t cachefid);
-static uint32_t fidof(short refnum);
+static uint32_t fidof(struct MyFCB *fcb);
 // no need to prototype init3, open3 etc... they are used once at bottom of file
 
 static int init3(void) {
@@ -77,64 +77,58 @@ static int init3(void) {
 	return 0;
 }
 
-static int open3(short refnum, int32_t cnid, uint32_t fid, const char *name) {
-	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
+static int open3(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name) {
 	int err = 0;
-
 	if (!(fcb->fcbFlags&fcbResourceMask)) {
 		// Data fork is relatively simple: the file can only be opened if it exists
-		WalkPath9(fid, fidof(refnum), "");
+		WalkPath9(fid, fidof(fcb), "");
 
 		if (fcb->fcbFlags&fcbWriteMask) {
-			err = Lopen9(fidof(refnum), O_RDWR, NULL, NULL);
+			err = Lopen9(fidof(fcb), O_RDWR, NULL, NULL);
 			if (err == 0) return 0;
 		}
 
-		err = Lopen9(fidof(refnum), O_RDONLY, NULL, NULL);
+		err = Lopen9(fidof(fcb), O_RDONLY, NULL, NULL);
 		return err;
 	} else {
-		openResourceFork(cnid, fid, name, fidof(refnum));
+		openResourceFork(cnid, fid, name, fidof(fcb));
 		return noErr;
 	}
 }
 
-static int close3(short refnum) {
-	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
-
+static int close3(struct MyFCB *fcb) {
 	if (!(fcb->fcbFlags&fcbResourceMask)) {
-		return Clunk9(fidof(refnum));
+		return Clunk9(fidof(fcb));
 	} else {
-		flushResourceFork(fcb->fcbFlNm, fidof(refnum));
-		Clunk9(fidof(refnum));
+		flushResourceFork(fcb->fcbFlNm, fidof(fcb));
+		Clunk9(fidof(fcb));
 		return 0;
 	}
 }
 
-static int read3(short refnum, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
-	return Read9(fidof(refnum), buf, offset, count, actual_count);
+static int read3(struct MyFCB *fcb, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	return Read9(fidof(fcb), buf, offset, count, actual_count);
 }
 
-static int write3(short refnum, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
-	return Write9(fidof(refnum), buf, offset, count, actual_count);
+static int write3(struct MyFCB *fcb, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	return Write9(fidof(fcb), buf, offset, count, actual_count);
 }
 
-static int geteof3(short refnum, uint64_t *len) {
+static int geteof3(struct MyFCB *fcb, uint64_t *len) {
 	struct Stat9 stat = {};
-	int err = Getattr9(fidof(refnum), STAT_SIZE, &stat);
+	int err = Getattr9(fidof(fcb), STAT_SIZE, &stat);
 	if (err) return err;
 	*len = stat.size;
 
 	return 0;
 }
 
-static int seteof3(short refnum, uint64_t len) {
-	struct MyFCB *fcb = UnivMustResolveFCB(refnum);
-
-	int err = Setattr9(fidof(refnum), SET_SIZE, (struct Stat9){.size=len});
+static int seteof3(struct MyFCB *fcb, uint64_t len) {
+	int err = Setattr9(fidof(fcb), SET_SIZE, (struct Stat9){.size=len});
 	if (err) return err;
 
 	if (fcb->fcbFlags&fcbResourceMask) {
-		flushResourceFork(fcb->fcbFlNm, fidof(refnum));
+		flushResourceFork(fcb->fcbFlNm, fidof(fcb));
 	}
 
 	return 0;
@@ -421,6 +415,6 @@ static void flushResourceFork(int32_t cnid, uint32_t cachefid) {
 	Clunk9(REZFID);
 }
 
-static uint32_t fidof(short refnum) {
-	return 32UL + refnum;
+static uint32_t fidof(struct MyFCB *fcb) {
+	return 32UL + fcb->refNum;
 }

@@ -1,36 +1,26 @@
 /* Copyright (c) 2023-2024 Elliot Nunn */
 /* Licensed under the MIT license */
 
-// File System Manager functions (UT_*) to access the FCB table may be:
-// unavailable and unnecessary (-7.1, or System file hasn't loaded yet)
-// available but unnecessary (7.5-8.6)
-// available and necessary (9.0-)
-// And the accessors weren't in InterfaceLib until 8.5!
-// So we must polyfill them.
-
-// Since we are replacing the "UT_" functions, change the FCBRec struct
-// to repurpose some fields for the multifork layer.
-
-// And while we are at it, we do reserve FCB 0 for "fictional use"
+// Functions to access and manipulate Fork Control Blocks (FCBs)
+//   Good for any ROM/System/FSM combination
+//   More ergonomic than the File System Manager API (just returns the answer!)
+//   FCBRec replaced with MyFCB to repurpose some fields for our own use
+//   Open FCBs for a given file can be listed using a hash table:
+//      for (struct MyFCB *fcb=UnivFirst(cnid, resfork); fcb!=NULL; fcb=UnivNext(fcb)) {}
 
 #pragma once
-
 #include <FSM.h>
 #include <Types.h>
 #include <stdint.h>
 
-enum {
-	FAKEREFNUM = 0x7ffe, // don't let userland programs see this!
-};
-
-// Fields inside a union are available for multifork use
+// Fields inside a union are repurposed and maybe available for multifork use
 struct MyFCB {
 	uint32_t fcbFlNm;            // FCB file number. Non-zero marks FCB used
 	char fcbFlags;               // FCB flags
 	char fcbTypByt;              // File type byte
 	union {
 		char pad1[2];
-		short nextOfSameFile; // circular linked list owned by device-9p.c
+		short refNum; // redundant, for convenience
 	};
 	uint32_t fcbEOF;             // Logical length or EOF in bytes
 	uint32_t fcbPLen;            // Physical file length in bytes
@@ -48,6 +38,7 @@ struct MyFCB {
 	OSType fcbFType;             // File's 4 Finder Type bytes
 	union {
 		char pad4[4];
+		struct {short left, right;}; // doubly linked list
 	};
 	uint32_t fcbDirID;           // Parent Directory ID
 	Str31 fcbCName;              // CName of open file
@@ -56,7 +47,13 @@ struct MyFCB {
 static char testStructSize1[94-sizeof (struct MyFCB)];
 static char testStructSize2[sizeof (struct MyFCB)-94];
 
-OSErr UnivAllocateFCB(short *fileRefNum, struct MyFCB **fileCtrlBlockPtr);
-OSErr UnivResolveFCB(short fileRefNum, struct MyFCB **fileCtrlBlockPtr);
-struct MyFCB *UnivMustResolveFCB(short fileRefNum);
-OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, struct MyFCB **fileCtrlBlockPtr);
+struct MyFCB *UnivAllocateFile(void); // returns NULL if out of FCBs
+void UnivEnlistFile(struct MyFCB *fcb); // panics on invalid arg
+void UnivDelistFile(struct MyFCB *fcb); // panics on invalid arg
+struct MyFCB *UnivGetFCB(short refnum); // returns NULL on invalid arg
+struct MyFCB *UnivMustGetFCB(short refnum); // panics on invalid arg
+struct MyFCB *UnivFirst(uint32_t cnid, bool resfork);
+struct MyFCB *UnivNext(struct MyFCB *fcb);
+
+// Example loop:
+// for (struct MyFCB *fcb=UnivFirst(cnid, resfork); fcb!=NULL; fcb=UnivNext(fcb)) {}
