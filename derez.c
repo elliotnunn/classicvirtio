@@ -22,7 +22,7 @@
 	  (uint32_t)(255 & (S)[3]))
 
 static char *lutget(char *dest, const char *lut, char letter);
-static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name);
+static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, uint8_t *name);
 static void derezFullLine(char *dest, char *src);
 
 // Escape code lookup table for quoted strings
@@ -62,88 +62,73 @@ static const char lut[5*256] =
 	"\\0xF8"     "\\0xF9"     "\\0xFA"     "\\0xFB"     "\\0xFC"     "\\0xFD"     "\\0xFE"     "\\0xFF";
 
 void DeRez(uint32_t forkfid, uint32_t textfid) {
-	panic("DeRez");
-// 	return;
-// 	printf("DeRez\n");
-// 	char rb[8*1024], wb[32*1024];
-//
-// 	uint32_t head[4];
-// 	Read9(forkfid, head, 0, sizeof head, NULL);
-// 	char map[64*1024];
-// 	Read9(forkfid, map, head[1], head[3], NULL);
-//
-// 	char *tl = map + READ16BE(map+24);
-// 	char *nl = map + READ16BE(map+26);
-//
-// 	int nt = (uint16_t)(READ16BE(tl) + 1);
-//
-// 	SetRead(forkfid, rb, sizeof rb);
-// 	SetWrite(textfid, wb, sizeof wb);
-//
-// 	for (int i=0; i<nt; i++) {
-// 		char *t = tl + 2 + 8*i;
-// 		int nr = READ16BE(t+4) + 1;
-// 		int r1 = READ16BE(t+6);
-// 		for (int j=0; j<nr; j++) {
-// 			char *r = tl + r1 + 12*j;
-//
-// 			int16_t id = READ16BE(r);
-// 			uint16_t nameoff = READ16BE(r+2);
-// 			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
-// 			uint8_t attr = *(r+4);
-// 			uint32_t contoff = READ24BE(r+5);
-//
-// 			derezHeader(attr, t, id, name);
-//
-// 			//rbufseek = head[0] + contoff;
-// 			char *ptr = BorrowReadBuf(4);
-// 			printf("%08x\n", ptr);
-// 			uint32_t len = READ32BE(ptr);
-// 			ReturnReadBuf(ptr+4);
-// 			printf("ok\n");
-//
-// 			// The fast part
-// 			char *src, *dst;
-// 			for (size_t i=0; i<len+15; i+=16) {
-// 				printf("L");
-// 				dst = BorrowWriteBuf(78);
-// 				src = BorrowReadBuf(16);
-// 				derezFullLine(dst, src);
-// 				ReturnWriteBuf(dst);
-// 				ReturnReadBuf(src);
-// 			}
-// 			printf("\n");
-//
-// 			// The slow tricky part: edit the last, incomplete line
-// 			int missing = 16 - (len % 16);
-// 			if (missing == 16) missing = 0;
-// 			wbufseek -= missing;
-// 			wbufcnt -= missing; // hack, need to reconsider interface
-//
-// 			char *edit = dst + 43; // Cut off hex digits and move the quote
-// 			for (int i=0; i<missing; i++) {
-// 				if ((i%2) == 0) *--edit = ' ';
-// 				*--edit = ' ';
-// 				*--edit = ' ';
-// 			}
-// 			*++edit = '"';
-//
-// 			edit = dst + 77; // Shorten the comment column
-// 			for (int i=0; i<missing; i++) *--edit = ' ';
-// 			*--edit = '/';
-// 			*--edit = '*';
-// 			*--edit = ' ';
-//
-// 			ptr = BorrowWriteBuf(4);
-// 			*ptr++ = '}';
-// 			*ptr++ = ';';
-// 			*ptr++ = '\n';
-// 			*ptr++ = '\n';
-// 			ReturnWriteBuf(ptr);
-// 		}
-// 	}
-//
-// 	Flush();
+	uint32_t head[4];
+	Read9(forkfid, head, 0, sizeof head, NULL);
+	char map[64*1024];
+	Read9(forkfid, map, head[1], head[3], NULL);
+
+	char *tl = map + READ16BE(map+24);
+	char *nl = map + READ16BE(map+26);
+
+	int nt = (uint16_t)(READ16BE(tl) + 1);
+
+	char rb[8*1024], wb[32*1024];
+	SetRead(forkfid, rb, sizeof rb);
+	SetWrite(textfid, wb, sizeof wb);
+
+	char *src=NULL, *dst=NULL;
+	for (int i=0; i<nt; i++) {
+		char *t = tl + 2 + 8*i;
+		int nr = READ16BE(t+4) + 1;
+		int r1 = READ16BE(t+6);
+		for (int j=0; j<nr; j++) {
+			char *r = tl + r1 + 12*j;
+
+			int16_t id = READ16BE(r);
+			uint16_t nameoff = READ16BE(r+2);
+			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
+			uint8_t attr = *(r+4);
+			uint32_t contoff = READ24BE(r+5);
+
+			dst = derezHeader(dst, attr, t, id, name);
+
+			RSeek(head[0] + contoff);
+			src = RBuffer(src, 4); // src always starts as NULL here
+			uint32_t len = READ32BE(src);
+			src += 4;
+
+			// The fast part
+			for (size_t i=0; i<len; i+=16) {
+				src = RBuffer(src, 16);
+				dst = WBuffer(dst, 78);
+				derezFullLine(dst, src);
+				src += 16;
+				dst += 78;
+			}
+			src = RBuffer(src, 0); // to be clear: sets src to NULL
+
+			int missing = (16 - (len % 16)) % 16;
+			if (missing) { // edit the hastily generated last line
+				int wipehex = missing*2 + missing/2;
+				memset(dst-35-wipehex, ' ', wipehex);
+				dst[-35-wipehex-1] = '"';
+
+				dst = dst - missing - 4;
+				*dst++ = ' ';
+				*dst++ = '*';
+				*dst++ = '/';
+				*dst++ = '\n';
+			}
+
+			dst = WBuffer(dst, 4);
+			*dst++ = '}';
+			*dst++ = ';';
+			*dst++ = '\n';
+			*dst++ = '\n';
+		}
+	}
+	dst = WBuffer(dst, 0); // definitively give-back the dest buffer
+	WFlush();
 }
 
 static char *lutget(char *dest, const char *lut, char letter) {
@@ -155,8 +140,8 @@ static char *lutget(char *dest, const char *lut, char letter) {
 	return dest;
 }
 
-static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
-	char *p = WBuffer(NULL, 2048);
+static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, uint8_t *name) {
+	p = WBuffer(p, 2048);
 	p = stpcpy(p, "data '");
 
 	for (int i=0; i<4; i++) {
@@ -196,7 +181,7 @@ static void derezHeader(uint8_t attrib, char *type, int16_t id, uint8_t *name) {
 	}
 
 	p = stpcpy(p, ") {\n");
-	WBuffer(p, 0);
+	return p;
 }
 
 static char cmtLUT[256] =
@@ -267,9 +252,10 @@ static void derezFullLine(char *dest, char *src) {
 	for (int i=0; i<16; i++) {
 		char orig = src[i];
 		char repl = cmtLUT[255 & orig];
+		*dest++ = repl;
 		if (orig == '*') {
 			cmtLUT['/'] = '.';
-		} else if ((255 & orig) > 32) { // Rez quirk
+		} else if ((255 & orig) >= 32) { // Rez quirk
 			cmtLUT['/'] = '/';
 		}
 	}
@@ -278,4 +264,5 @@ static void derezFullLine(char *dest, char *src) {
 	*dest++ = '*';
 	*dest++ = '/';
 	*dest++ = '\n';
+	return dest;
 }
