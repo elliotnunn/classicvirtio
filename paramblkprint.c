@@ -294,6 +294,7 @@ static const char *errname(short err) {
 		case -120: return "dirNF";
 		case -121: return "tmwdo";
 		case -122: return "badMov";
+		case -1302: return "notAFileErr";
 		default: return "unknown";
 	}
 }
@@ -1035,11 +1036,33 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 	case 0x12: // XGetVolInfo
 		return "";
 	case 0x14: // CreateFileIDRef
-		return "";
+		if (status > 0) {
+			// parameters
+			return "ioNamePtr18s "
+			       "ioVRefNum22w "
+			       "ioDirID48l";
+		} else if (status == 0 || status == notAFileErr) {
+			// return on noErr
+			return "ioFileID54l";
+		} else {
+			// return on failure
+			return "";
+		}
 	case 0x15: // DeleteFileIDRef
-		return "";
+		if (status > 0) {
+			// parameters
+			return "ioFileID54l";
+		} else {
+			return "";
+		}
 	case 0x16: // ResolveFileIDRef
-		return "";
+		if (status > 0) {
+			// parameters
+			return "ioFileID54l";
+		} else {
+			return "ioNamePtr18s "
+			       "ioDirID48l";
+		}
 	case 0x17: // ExchangeFiles
 		return "";
 	case 0x18: // CatSearch

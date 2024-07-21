@@ -122,6 +122,7 @@ static struct VCB vcb = {
 static struct GetVolParmsInfoBuffer vparms = {
 	.vMVersion = 1, // goes up to version 4
 	.vMAttrib = 0
+		| (1<<bHasFileIDs)
 		| (1<<bNoMiniFndr)
 		| (1<<bNoLclSync)
 		| (1<<bTrshOffLine)
@@ -1339,6 +1340,35 @@ static OSErr fsCloseWD(struct WDParam *pb) {
 	return noErr;
 }
 
+static OSErr fsCreateFileIDRef(struct FIDParam *pb) {
+	int32_t cnid = pbDirID(pb);
+	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	if (IsErr(cnid)) {
+		pb->ioFileID = 0;
+		return cnid;
+	} else if (IsDir(cnid)) {
+		pb->ioFileID = cnid;
+		return notAFileErr;
+	} else {
+		pb->ioFileID = cnid;
+		return noErr;
+	}
+}
+
+static OSErr fsResolveFileIDRef(struct FIDParam *pb) {
+	int32_t parent = getDBParent(pb->ioFileID);
+	if (parent == 0) {
+		return fidNotFound;
+	}
+	const char *name = getDBName(pb->ioFileID);
+
+	pb->ioSrcDirID = parent;
+	if (pb->ioNamePtr) {
+		mr31name(pb->ioNamePtr, name);
+	}
+	return noErr;
+}
+
 // Divine the meaning of ioVRefNum and ioDirID
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;
@@ -1585,9 +1615,9 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMLockRng: return extFSErr;
 	case kFSMUnlockRng: return extFSErr;
 	case kFSMXGetVolInfo: return fsGetVolInfo(pb);
-	case kFSMCreateFileIDRef: return extFSErr;
-	case kFSMDeleteFileIDRef: return extFSErr;
-	case kFSMResolveFileIDRef: return extFSErr;
+	case kFSMCreateFileIDRef: return fsCreateFileIDRef(pb);
+	case kFSMDeleteFileIDRef: return noErr;
+	case kFSMResolveFileIDRef: return fsResolveFileIDRef(pb);
 	case kFSMExchangeFiles: return extFSErr;
 	case kFSMCatSearch: return extFSErr;
 	case kFSMOpenDF: return fsOpen(pb);
