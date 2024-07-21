@@ -1598,8 +1598,8 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMEject: return extFSErr;
 	case kFSMGetFPos: return fsRead(pb);
 	case kFSMOffline: return extFSErr;
-	case kFSMSetFilLock: return extFSErr;
-	case kFSMRstFilLock: return extFSErr;
+	case kFSMSetFilLock: return noErr; // file locking unimplemented
+	case kFSMRstFilLock: return noErr; // but this appeases ResEdit
 	case kFSMSetFilType: return extFSErr;
 	case kFSMSetFPos: return fsRead(pb);
 	case kFSMFlushFile: return noErr;
