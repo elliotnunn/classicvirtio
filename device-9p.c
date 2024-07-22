@@ -7,6 +7,7 @@
 #include <Disks.h>
 #include <DriverGestalt.h>
 #include <DriverServices.h>
+#include <Errors.h>
 #include <Files.h>
 #include <FSM.h>
 #include <Gestalt.h>

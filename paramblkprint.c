@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <Errors.h>
 
 #include "printf.h"
 
@@ -1042,7 +1043,6 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			       "ioVRefNum22w "
 			       "ioDirID48l";
 		} else if (status == 0 || status == notAFileErr) {
-			// return on noErr
 			return "ioFileID54l";
 		} else {
 			// return on failure
