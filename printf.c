@@ -49,24 +49,19 @@ static void _sccreg(char key, char val) {
 void _putchar(char character) {
 	if (!logenable) return;
 
-	static int inited;
-	if (!inited) {
-		_sccreg(9, 0x80); // reset A/modem
+	volatile char *aData = *(char **)0x1dc + 6;
+	// On a Quadra this is 50f0c026
+
+	static char lastchar = '\n';
+	if (lastchar == '\n') {
+		_sccreg(9, 0x80); // Reinit serial.... reset A/modem
 		_sccreg(4, 0x48); // SB1 | X16CLK
 		_sccreg(12, 0); // basic baud rate
 		_sccreg(13, 0); // basic baud rate
 		_sccreg(14, 3); // baud rate generator = BRSRC | BRENAB
 		// skip enabling receive via reg 3
 		_sccreg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
-		inited = 1;
-	}
 
-
-	volatile char *aData = *(char **)0x1dc + 6;
-	// On a Quadra this is 50f0c026
-
-	static char lastchar = '\n';
-	if (lastchar == '\n') {
 		for (int i=0; logprefix[i] != 0; i++) {
 			*aData = logprefix[i];
 		}
