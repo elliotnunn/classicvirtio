@@ -896,7 +896,8 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 // Update the EOF of all duplicate FCBs
 static void updateKnownLength(struct MyFCB *fcb, int32_t length) {
 	for (fcb=UnivFirst(fcb->fcbFlNm, fcb->fcbFlags&fcbResourceMask); fcb!=NULL; fcb=UnivNext(fcb)) {
-		fcb->fcbCrPs = length;
+		fcb->fcbEOF = length;
+		fcb->fcbPLen = (length + 511) & -512;
 	}
 }
 
@@ -917,16 +918,10 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	struct MFAttr attr = {};
 	MF.FGetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
 
-	uint64_t size;
-	MF.GetEOF(fcb, &size);
-	if (size > 0xfffffd00) size = 0xfffffd00;
-
 	fcb->fcbFlNm = cnid;
 	fcb->fcbFlags =
 		(fcbResourceMask * ((pb->ioTrap&0xff)==(_OpenRF&0xff))) |
 		(fcbWriteMask * (pb->ioPermssn != fsRdPerm));
-	fcb->fcbEOF = size;
-	fcb->fcbPLen = (size + 511) & -512;
 	fcb->fcbVPtr = &vcb;
 	fcb->fcbClmpSize = 512;
 	fcb->fcbDirID = getDBParent(cnid);
@@ -940,6 +935,12 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	else if (lerr) return ioErr;
 
 	UnivEnlistFile(fcb);
+
+	uint64_t size;
+	MF.GetEOF(fcb, &size);
+	if (size > 0xfffffd00) size = 0xfffffd00;
+	updateKnownLength(fcb, size);
+
 	pb->ioRefNum = fcb->refNum;
 	return noErr;
 }
