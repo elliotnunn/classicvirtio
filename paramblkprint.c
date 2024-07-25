@@ -82,7 +82,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 			for (int i=0; i<32; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
 			break;
 		case 'F': // 16-bit file Finder info
-			for (int i=0; i<32; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
+			for (int i=0; i<16; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
 			break;
 		case 'M': // generic Control call name
 			SPRINTF("%d %s", *(unsigned short *)(pb+offset), controlname(*(unsigned short *)(pb+offset)));
@@ -610,7 +610,7 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			return "ioNamePtr18s "
 			       "ioFRefNum24w "
 			       "ioFlAttrib30b "
-			       "ioFlFndrInfo32V "
+			       "ioFlFndrInfo32F "
 			       "ioDirID48l "
 			       "ioFlStBlk52w "
 			       "ioFlLgLen54l "
@@ -629,7 +629,7 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			// parameters
 			return "ioNamePtr18s "
 			       "ioVRefNum22w "
-			       "ioFlFndrInfo32V "
+			       "ioFlFndrInfo32F "
 			       "ioDirID48l "
 			       "ioFlCrDat72l "
 			       "ioFlMdDat76l";
@@ -948,7 +948,7 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 				       "ioFRefNum24w "
 				       "ioFlAttrib30b "
 				       "ioACUser31b "
-				       "ioFlFndrInfo32V "
+				       "ioFlFndrInfo32F "
 				       "ioDirID48l "
 				       "ioFlStBlk52w "
 				       "ioFlLgLen54l "
@@ -973,7 +973,7 @@ static const char *minilang(const char *pb, unsigned short selector, unsigned sh
 			return "ioNamePtr18s "
 			       "ioVRefNum22w "
 			       "ioFlAttrib30b "
-			       "ioFlFndrInfo32V "
+			       "ioFlFndrInfo32F "
 			       "ioDirID48l "
 			       "ioFlCrDat72l "
 			       "ioFlMdDat76l "
