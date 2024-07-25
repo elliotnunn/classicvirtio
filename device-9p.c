@@ -784,7 +784,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 
 	// Clear only "CatInfo" fields, from ioFlBkDat onward
 	memset((char *)pb + 80, 0, 108 - 80);
-
+	memcpy(&pb->ioFlXFndrInfo, attr.fxinfo, sizeof pb->ioFlXFndrInfo);
 	pb->ioFlParID = getDBParent(cnid);
 }
 
