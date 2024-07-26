@@ -22,6 +22,7 @@
 #include "catalog.h"
 #include "device.h"
 #include "fids.h"
+#include "log.h"
 #include "multifork.h"
 #include "printf.h"
 #include "panic.h"
@@ -36,7 +37,6 @@
 
 #include <stdbool.h> // leave till last, conflicts with Universal Interfaces
 #include <stddef.h>
-#include <stdio.h>
 #include <string.h>
 
 #define c2pstr(p, c) {uint8_t l=strlen(c); p[0]=l; memcpy(p+1, c, l);}
@@ -150,8 +150,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
-	if (code <= 6 && logenable)
+	if (code <= 6) {
 		printf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
+	}
 
 	switch (code) {
 	case kInitializeCommand:
@@ -188,8 +189,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		break;
 	}
 
-	if (code <= 6 && logenable)
+	if (code <= 6) {
 		printf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
+	}
 
 	// Return directly from every call
 	if (kind & kImmediateIOCommandKind) {
@@ -215,12 +217,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
 	regentryid = info->deviceEntry;
-	sprintf(logprefix, ".Virtio9P(%d) ", info->refNum);
-// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		logenable = 1;
-// 	}
-
-	printf("Starting\n");
+	InitLog();
+	sprintf(LogPrefix, "9P(%d) ", info->refNum);
 
 	if (!VInit(&info->deviceEntry)) {
 		printf("Transport layer failure\n");
@@ -703,9 +701,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (IsErr(cnid)) return cnid;
 	}
 
-	if (logenable) {
-		printf("Found: "); cnidPrint(cnid); printf("\n");
-	}
+	printf("Found: "); cnidPrint(cnid); printf("\n");
 
 	// A special return field: don't change the field, just follow the pointer
 	if ((idx != 0) && (pb->ioNamePtr != NULL)) {
@@ -1437,8 +1433,7 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 
 // Print a CNID to the log as a /unix/path
 static void cnidPrint(int32_t cnid) {
-	if (!logenable) return;
-
+	if (!LogEnable) return; // expensive
 	char big[512];
 	int remain = sizeof big;
 
@@ -1560,15 +1555,13 @@ static long fsCall(void *pb, long selector) {
 		selector = trap;
 	}
 
-	if (logenable) {
+	if (LogEnable) {
 		printf("FS_%s", PBPrint(pb, selector, 1));
-		strcat(logprefix, "     ");
 	}
 
 	OSErr result = fsDispatch(pb, selector);
 
-	if (logenable) {
-		logprefix[strlen(logprefix) - 5] = 0;
+	if (LogEnable) {
 		printf("%s", PBPrint(pb, selector, result));
 	}
 

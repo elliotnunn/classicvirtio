@@ -12,8 +12,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "printf.c" // yes, the implementation file
-
 struct elf {
 	char e_ident[16];
 	uint16_t e_type;
@@ -95,8 +93,6 @@ static const void *slotStruct(int slot, int srsrc, ...) {
 }
 
 void exec(struct SEBlock *pb) {
-	logenable = 1;
-
 	int err;
 
 	// see the workaround in slotexec-boot.c
@@ -125,9 +121,6 @@ void exec(struct SEBlock *pb) {
 	struct phdr *textseg = NULL, *dataseg = NULL;
 
 	for (struct phdr *seg=PH0; seg<PHEND; seg=PHNEXT(seg)) {
-// 		printf("type=%d offset=%#x vaddr=%#x paddr=%#x filesz=%#x memsz=%#x flags=%#x\n",
-// 			seg->p_type, seg->p_offset, seg->p_vaddr, seg->p_paddr, seg->p_filesz, seg->p_memsz, seg->p_flags);
-
 		if (seg->p_type != 1) continue; // need LOAD
 
 		if (seg->p_flags & 2) { // writable (probably the data segment)
@@ -144,7 +137,6 @@ void exec(struct SEBlock *pb) {
 	Handle hdl = NewHandleSysClear(sizeof (struct drvr) + dataseg->p_memsz);
 	if (!hdl) SysError(0xdd00);
 	HLock(hdl);
-// 	printf("allocated %#x at %#x\n", sizeof (struct drvr) + dataseg->p_memsz, *hdl);
 	struct drvr *drvr = (struct drvr *)*hdl;
 
 	drvr->flags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dWritEnableMask|dReadEnableMask;
@@ -175,15 +167,11 @@ void exec(struct SEBlock *pb) {
 		uint32_t *slot = (uint32_t *)(newdata + i);
 
 		if (*slot - textseg->p_vaddr < textseg->p_memsz) {
-// 			printf("code ptr at ELF+%#x changing from %#x to ELF+%#x = ", dataseg->p_offset+i, *slot, *slot - textseg->p_vaddr - textseg->p_offset);
 			*slot += (uint32_t)newtext - textseg->p_vaddr;
 			i+=2;
-// 			printf("%#x\n", *slot);
 		} else if (*slot - dataseg->p_vaddr < dataseg->p_memsz) {
-// 			printf("data ptr at ELF+%#x changing from %#x to copyof(ELF+%#x) = ", dataseg->p_offset+i, *slot, *slot - dataseg->p_vaddr + dataseg->p_offset);
 			*slot += (uint32_t)newdata - dataseg->p_vaddr;
 			i+=2;
-// 			printf("%#x\n", *slot);
 		}
 	}
 

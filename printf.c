@@ -36,42 +36,6 @@
 #include "printf.h"
 
 
-// DEFINED HERE FOR VIRTIO DRIVER
-int logenable;
-char logprefix[80];
-
-static void _sccreg(char key, char val) {
-	volatile char *aCtl = *(char **)0x1dc + 2;
-	*aCtl = key;
-	*aCtl = val;
-}
-
-void _putchar(char character) {
-	if (!logenable) return;
-
-	volatile char *aData = *(char **)0x1dc + 6;
-	// On a Quadra this is 50f0c026
-
-	static char lastchar = '\n';
-	if (lastchar == '\n') {
-		_sccreg(9, 0x80); // Reinit serial.... reset A/modem
-		_sccreg(4, 0x48); // SB1 | X16CLK
-		_sccreg(12, 0); // basic baud rate
-		_sccreg(13, 0); // basic baud rate
-		_sccreg(14, 3); // baud rate generator = BRSRC | BRENAB
-		// skip enabling receive via reg 3
-		_sccreg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
-
-		for (int i=0; logprefix[i] != 0; i++) {
-			*aData = logprefix[i];
-		}
-	}
-
-	lastchar = *aData = character;
-}
-
-// END OF VIRTIO DRIVER DEFINITIONS
-
 // define this globally (e.g. gcc -DPRINTF_INCLUDE_CONFIG_H ...) to include the
 // printf_config.h header file
 // default: undefined
@@ -102,9 +66,9 @@ void _putchar(char character) {
 
 // support for exponential floating point notation (%e/%g)
 // default: activated
-// #ifndef PRINTF_DISABLE_SUPPORT_EXPONENTIAL
-// #define PRINTF_SUPPORT_EXPONENTIAL
-// #endif
+#ifndef PRINTF_DISABLE_SUPPORT_EXPONENTIAL
+#define PRINTF_SUPPORT_EXPONENTIAL
+#endif
 
 // define the default floating point precision
 // default: 6 digits
@@ -120,9 +84,9 @@ void _putchar(char character) {
 
 // support for the long long types (%llu or %p)
 // default: activated
-// #ifndef PRINTF_DISABLE_SUPPORT_LONG_LONG
-// #define PRINTF_SUPPORT_LONG_LONG
-// #endif
+#ifndef PRINTF_DISABLE_SUPPORT_LONG_LONG
+#define PRINTF_SUPPORT_LONG_LONG
+#endif
 
 // support for the ptrdiff_t type (%t)
 // ptrdiff_t is normally defined in <stddef.h> as long or long long type
@@ -897,7 +861,6 @@ static int _vsnprintf(out_fct_type out, char* buffer, const size_t maxlen, const
 
 int printf_(const char* format, ...)
 {
-  if (!logenable) return 0;
   va_list va;
   va_start(va, format);
   char buffer[1];

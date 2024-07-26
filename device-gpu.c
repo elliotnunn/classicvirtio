@@ -22,6 +22,7 @@
 #include "callin68k.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
+#include "log.h"
 #include "printf.h"
 #include "panic.h"
 #include "patch68k.h"
@@ -273,7 +274,7 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		if (logenable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
+		if ((*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
 			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
 				printf("Control(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
@@ -283,25 +284,21 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if (logenable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
+		if ((*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
 			printf("    = %d\n", err);
 		}
 
 		break;
 	case kStatusCommand:
-		if (logenable) {
-			if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames)) {
-				printf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
-			} else {
-				printf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
-			}
+		if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames)) {
+			printf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
+		} else {
+			printf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
 		}
 
 		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if (logenable) {
-			printf("    = %d\n", err);
-		}
+		printf("    = %d\n", err);
 
 		break;
 	case kOpenCommand:
@@ -325,12 +322,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
 
-	sprintf(logprefix, ".Display_Video_Apple_Virtio(%d) ", info->refNum);
-// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-// 		logenable = 1;
-// 	}
-
-	printf("Starting\n");
+	InitLog();
+	sprintf(LogPrefix, "GPU(%d) ", info->refNum);
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) {
@@ -939,7 +932,6 @@ static void perfTest(void) {
 	KeyMap keys;
 	GetKeys(keys);
 	if ((keys[1]&9) == 9) {
-		logenable = 1; // enable debug printing from now on
 		printf("Switching to %dx%dx%d. Speed test:\n", W, H, 1<<(depth-kDepthMode1));
 	} else {
 		printf("Switching to %dx%dx%d. Ctrl-shift for speed test.\n", W, H, 1<<(depth-kDepthMode1));

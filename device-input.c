@@ -94,12 +94,8 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	sprintf(logprefix, ".VirtioInput(%d) ", info->refNum);
-// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-// 		logenable = 1;
-// 	}
-
-	printf("Starting\n");
+	InitLog();
+	sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
 	if (!VInit(&info->deviceEntry)) {
 		printf("Transport layer failure\n");
@@ -137,6 +133,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	ScrollInit();
 
+	printf("Ready\n");
 	return noErr;
 }
 

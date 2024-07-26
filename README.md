@@ -78,3 +78,10 @@ GPU
 	-device virtio-vga
 
 **68k: not working yet**
+
+Debug output
+============
+
+Append the following to your QEMU command line:
+
+	-device virtio-serial -device virtconsole,chardev=foo -chardev stdio,id=foo

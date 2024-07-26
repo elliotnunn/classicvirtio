@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "log.h"
 #include "printf.h"
 
 #include "patch68k.h"
@@ -197,7 +198,7 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	SetPtrSize((Ptr)block, (char *)code - (char *)block); // shrink
 	setvec(vector, &block->code); // install
 
-	if (logenable) {
+	if (LogEnable) {
 		printf("vector=%X, oldcode=%p, newcode=%p\n",
 			vector, block->original, &block->code);
 

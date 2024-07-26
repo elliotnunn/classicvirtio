@@ -9,8 +9,6 @@
 
 #include <stdint.h>
 
-#include "printf.h"
-
 void dbgStack(long) = {0xa9ff}; // for when MacsBug keyboard input is broken
 
 void exec(struct SEBlock *pb) {
