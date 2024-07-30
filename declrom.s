@@ -112,8 +112,13 @@ ROMSTART:
 sResourceDirectory:
 	OSLstEntry 1, BoardResource
 
-.rept 32 /* Maximum number of 9P devices */
+.rept 32 /* Maximum number of 9P devices, starting at sResource 128 */
 	OSLstEntry resNum, Resource9P
+.set resNum, resNum+1
+.endr
+
+.rept 32 /* Maximum number of block devices, starting at sResource 160 */
+	OSLstEntry resNum, ResourceBlock
 .set resNum, resNum+1
 .endr
 
@@ -232,6 +237,26 @@ Resource9P:
 	.align 2
 3$:
 	.incbin "build/classic/drvr-9p.elf"
+
+ResourceBlock:
+	OSLstEntry sRsrcType, 1$
+	OSLstEntry sRsrcName, 2$
+	OSLstEntry sRsrcLoadRec, SharedDriverLoader
+	OSLstEntry sRsrcBootRec, BootRec
+	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
+	DatLstEntry sRsrcHWDevId, 1
+	OSLstEntry 199, 3$
+	DatLstEntry endOfList, 0
+1$:
+	.short catCPU
+	.short typeDesk
+	.short drSwMacCPU
+	.short 0x5602
+2$:
+	.asciz "VirtioBlock" /* without a leading dot */
+	.align 2
+3$:
+	.incbin "build/classic/drvr-block.elf"
 
 ResourceInput:
 	OSLstEntry sRsrcType, 1$

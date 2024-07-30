@@ -43,6 +43,19 @@ Tablet input
 
 	-device virtio-tablet-device
 
+Disk driver
+===========
+
+*Lets QEMU use unpartitioned disk images, like Basilisk II or Mini vMac*
+
+- bug: read-only
+- bug: freezes on PowerPC
+
+**PowerPC: not working yet** **68k: works out of the box**
+
+	-blockdev driver=file,read-only=on,node-name=FOO,filename=DISK.IMG
+	-device virtio-blk,drive=FOO
+
 9P device
 =========
 

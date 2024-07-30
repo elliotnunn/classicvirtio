@@ -28,7 +28,8 @@ void exec(struct SEBlock *pb) {
 	LMGetToolScratch()[3] = pb->sesRsrcId;
 
 	struct SlotDevParam spb = {
-		.ioNamePtr="\x09" ".Virtio9P",
+		.ioNamePtr="\p.", // needs to start with dot, otherwise not important
+		// but ioNamePtr can cause crashes if selected dynamically: why?
 		.ioSPermssn=0,
 		.ioSlot=pb->seSlot,
 		.ioID=pb->sesRsrcId,

@@ -17,8 +17,8 @@ $(shell mkdir -p build/classic build/ndrv build/test)
 # The supported Virtio devices for each Mac platform (see device-9p.c etc)
 #     "CLASSIC" means a 68k DRVR for a NuBus device under qemu-system-m68k
 #     "NDRV" means a PowerPC NDRV for a PCI device under qemu-system-ppc
-DEVICES_CLASSIC = 9p input
-DEVICES_NDRV = 9p input gpu
+DEVICES_CLASSIC = block 9p input
+DEVICES_NDRV = block 9p input gpu
 
 # And these are the C files that each device-*.c depends on (some are arch-specific)
 SUPPORT := $(filter-out device-%.c,$(wildcard *.c))
