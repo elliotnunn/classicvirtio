@@ -202,7 +202,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 void DNotified(uint16_t q, size_t len, void *tag) {
-	QueueNotified9();
+	QueueNotified9(q, len, tag); // maybe dependency injection would be better
 }
 
 void DConfigChange(void) {

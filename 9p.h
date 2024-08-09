@@ -244,4 +244,4 @@ int Clunk9(uint32_t fid);
 int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Fsync9(uint32_t fid);
-void QueueNotified9(void);
+void QueueNotified9(uint16_t q, size_t len, void *tag);

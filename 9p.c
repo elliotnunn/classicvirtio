@@ -7,7 +7,6 @@ Enough of the 9P2000.L protocol to support the Mac OS File Manager
 Why the dot-L variant?
 
 TODO:
-- Reentrancy (for Virtual Memory, not for the single-threaded File Manager)
 - Yield back to the File Manager while idle (rather than spinning)
 - Range-based IO (rather than a virtio buffer for each page)
 */
@@ -62,11 +61,10 @@ uint32_t Max9;
 
 static uint32_t openfids;
 
-static volatile bool flag;
-
 static void **physicals; // newptr allocated block
 
 int bufcnt;
+volatile int freebufs;
 
 #define QIDF "0x%02x.%x.%x"
 #define QIDA(qid) qid.type, qid.version, (uint32_t)qid.path
@@ -79,7 +77,7 @@ int Init9(int bufs) {
 	enum {Rversion = 101}; // size[4] Rversion tag[2] msize[4] version[s]
 
 	if (bufs > 256) bufs = 256;
-	bufcnt = bufs;
+	freebufs = bufcnt = bufs;
 
 	Max9 = 4096 * (bufs - 4);
 
@@ -455,8 +453,8 @@ int Fsync9(uint32_t fid) {
 		fid);
 }
 
-void QueueNotified9(void) {
-	flag = true;
+void QueueNotified9(uint16_t q, size_t len, void *tag) {
+	*(volatile bool *)tag = true; // raise the flag
 }
 
 /*
@@ -603,10 +601,17 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 		}
 	}
 
-	flag = false;
-	QSend(0, txn, rxn, (void *)pa, sz, NULL);
+	while (freebufs < txn + rxn) {
+		QPoll(0); // will only happen if this call is reentrant
+	}
+	freebufs -= txn + rxn;
+
+	volatile bool flag = false;
+	QSend(0, txn, rxn, (void *)pa, sz, (void *)&flag);
 	QNotify(0);
 	while (!flag) QPoll(0); // spin -- unfortunate
+
+	freebufs += txn + rxn;
 
 	CLEANUP();
 
