@@ -53,6 +53,7 @@ enum {
 	FID2,
 	FID3,
 	FIDPERSIST,
+	FIDPROFILE,
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 256 * 1024, // large stack bc memory is so hard to allocate
@@ -255,6 +256,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
 		return openErr;
 	}
+
+	#if INSTRUMENT
+		WalkPath9(ROOTFID, FIDPROFILE, "");
+		if (Lcreate9(FIDPROFILE, O_WRONLY|O_TRUNC, 0755, 0, "9profile.sh", NULL, NULL)) {
+			panic("failed create profile output");
+		}
+
+		InitProfile(FIDPROFILE);
+	#endif
 
 	// Start up the database for catalog IDs and other purposes
 	Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);

@@ -31,6 +31,10 @@ SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 # Settle a dispute between MacTypes.h and stdbool.h
 CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
 
+# Uncomment this to generate a CPU time profile for the 9p driver
+# To view it, run "./9profile.sh | flamegraph.pl > fg.svg"
+# INSTRUMENT = -DINSTRUMENT=1 -finstrument-functions
+
 ############################# CLASSIC DRVR #############################
 
 INTERFACEONLY = $(shell m68k-apple-macos-gcc -print-file-name=libInterface.a)
@@ -63,7 +67,7 @@ build/classic/slotexec-%: build/classic/slotexec-%.elf
 
 # Compile the DRVR code files (slotexec code has different compiler options)
 build/classic/%.o: %.c
-	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -Os -msep-data -ffunction-sections -fdata-sections -o $@ $<
+	m68k-apple-macos-gcc $(CDEFS) $(INSTRUMENT) -c -m68040 -Os -msep-data -ffunction-sections -fdata-sections -o $@ $<
 
 # Link each driver into an ELF, which will be DRVRised by slotexec-drvrload.c
 # This code uses A5-refs (-msep-data) so we cannot use the Retro68 libc, but Interfaces are fine
