@@ -81,16 +81,9 @@ Disk driver
 GPU
 ===
 
-*Displays video at any resolution up to 4K*
+*Removed in favour of SolraBizna's QFB work in progress*
 
-- bug: client-side gamma correction
-- bug: misses direct (non-QuickDraw) framebuffer access when interrupts are off
-
-**PowerPC: patches required to QEMU and OpenBIOS**
-
-	-device virtio-vga
-
-**68k: not working yet**
+*Might be brought back in future as a 3D coprocessor, but not a display device*
 
 Debug output
 ============

@@ -18,7 +18,7 @@ $(shell mkdir -p build/classic build/ndrv build/test)
 #     "CLASSIC" means a 68k DRVR for a NuBus device under qemu-system-m68k
 #     "NDRV" means a PowerPC NDRV for a PCI device under qemu-system-ppc
 DEVICES_CLASSIC = block 9p input
-DEVICES_NDRV = block 9p input gpu
+DEVICES_NDRV = block 9p input
 
 # And these are the C files that each device-*.c depends on (some are arch-specific)
 SUPPORT := $(filter-out device-%.c,$(wildcard *.c))
