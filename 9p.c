@@ -453,10 +453,6 @@ int Fsync9(uint32_t fid) {
 		fid);
 }
 
-void QueueNotified9(uint16_t q, size_t len, void *tag) {
-	*(volatile bool *)tag = true; // raise the flag
-}
-
 /*
 letter |  Tx  |  Rx  | Tx args      | Rx args       | comment
 b         ok     ok    uint8_t        uint8_t *       byte
@@ -601,16 +597,8 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 		}
 	}
 
-	while (freebufs < txn + rxn) {
-		QPoll(0); // will only happen if this call is reentrant
-	}
 	freebufs -= txn + rxn;
-
-	volatile bool flag = false;
-	QSend(0, txn, rxn, (void *)pa, sz, (void *)&flag);
-	QNotify(0);
-	while (!flag) QPoll(0); // spin -- unfortunate
-
+	QSend(0, txn, rxn, (void *)pa, sz, NULL, true/*wait*/);
 	freebufs += txn + rxn;
 
 	CLEANUP();

@@ -7,10 +7,10 @@
 
 #include <stdbool.h>
 
-#include "allocator.h"
-#include "atomic.h"
+#include "ConditionalMacros.h"
 #include "allocator.h"
 #include "device.h"
+#include "interruptmask.h"
 #include "panic.h"
 #include "printf.h"
 #include "transport.h"
@@ -26,19 +26,18 @@ enum {
 struct virtq {
 	uint16_t size;
 	uint16_t used_ctr;
-	int32_t interest;
 	struct virtq_desc *desc;
 	struct virtq_avail *avail;
 	struct virtq_used *used;
-	void *tag[MAX_RING];
+	volatile uint32_t *retlenptrs[MAX_RING];
 };
 
+static void poll(uint16_t q);
+
 static struct virtq queues[MAX_VQ];
-static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag, bool *ret);
-static void QInterestAtomicPart(uint16_t q, int32_t delta);
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
-	if (q > MAX_VQ) return 0;
+	if (q >= MAX_VQ) return 0;
 
 	uint16_t size = max_size;
 	if (size > MAX_RING) size = MAX_RING;
@@ -61,20 +60,19 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	// Mark all descriptors free
 	for (int i=0; i<queues[q].size; i++) queues[q].desc[i].next = 0xffff;
 
-	// Disable notifications until QInterest
-	queues[q].avail->flags = 1;
-
 	return size;
 }
 
-bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag) {
-	bool ret;
-	ATOMIC7(QSendAtomicPart, q, n_out, n_in, addrs, sizes, tag, &ret);
-	return ret;
-}
+void QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, volatile uint32_t *retsize, bool wait) {
+	volatile uint32_t myval;
+	if (retsize == NULL && wait) {
+		retsize = &myval;
+	}
+	if (retsize != NULL) {
+		*retsize = 0;
+	}
 
-static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag, bool *ret) {
-	*ret = false;
+	short sr = DisableInterrupts();
 
 	// Reverse iterate through user's buffers, create a linked descriptor list
 	uint16_t remain = n_out + n_in;
@@ -96,9 +94,10 @@ static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t 
 		nextbuf = buf;
 	}
 
+	// maybe this should wait for more descriptors to be available?
 	if (remain) panic("attempted QSend when out of descriptors");
 
-	queues[q].tag[nextbuf] = tag;
+	queues[q].retlenptrs[nextbuf] = retsize;
 
 	// Put a pointer to the "head" descriptor in the avail queue
 	uint16_t idx = queues[q].avail->idx;
@@ -107,50 +106,34 @@ static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t 
 	queues[q].avail->idx = idx + 1;
 	SynchronizeIO();
 
-	*ret = true;
-	return;
-}
-
-void QNotify(uint16_t q) {
 	if (queues[q].used->flags == 0) VNotify(q);
-}
 
-void QInterest(uint16_t q, int32_t delta) {
-	ATOMIC2(QInterestAtomicPart, q, delta);
-}
-
-static void QInterestAtomicPart(uint16_t q, int32_t delta) {
-	queues[q].interest += delta;
-	queues[q].avail->flags = (queues[q].interest == 0);
-}
-
-// Called by transport hardware interrupt to reduce chance of redundant interrupts
-void QDisarm(void) {
-	for (uint16_t q=0; queues[q].size != 0; q++) {
-		queues[q].avail->flags = 1;
+	if (wait) {
+		if (Interruptible(sr)) {
+			// Block the emulator and wait efficiently
+			ReenableInterruptsAndWaitFor(sr, retsize);
+		} else {
+			// Unavoidable poll
+			do {
+				poll(q);
+			} while (*retsize == 0);
+			ReenableInterrupts(sr);
+		}
+	} else {
+		ReenableInterrupts(sr);
 	}
-	SynchronizeIO();
 }
 
-// Called by transport at "deferred" or "secondary" interrupt time
+// Called by transport at interrupt time, fear no further interruption
 void QNotified(void) {
 	for (uint16_t q=0; queues[q].size != 0; q++) {
-		QPoll(q);
-	}
-
-	VRearm();
-	for (uint16_t q=0; queues[q].size != 0; q++) {
-		queues[q].avail->flags = queues[q].interest == 0;
-	}
-	SynchronizeIO();
-
-	for (uint16_t q=0; queues[q].size != 0; q++) {
-		QPoll(q);
+		poll(q);
 	}
 }
 
 // Call DNotified for each buffer in the used ring
-void QPoll(uint16_t q) {
+// not reentrant, only ever called with interrupts masked
+static void poll(uint16_t q) {
 	uint16_t i = queues[q].used_ctr;
 	uint16_t mask = queues[q].size - 1;
 	uint16_t end = queues[q].used->idx;
@@ -168,6 +151,10 @@ void QPoll(uint16_t q) {
 			buf = nextbuf;
 		}
 
-		DNotified(q, len, queues[q].tag[first]);
+		volatile uint32_t *retsize = queues[q].retlenptrs[first];
+		if (retsize != NULL) {
+			*retsize = len;
+		}
+		DNotified(q, queues[q].retlenptrs[first]);
 	}
 }

@@ -35,6 +35,7 @@ static void reQueue(int bufnum);
 
 static struct event *lpage;
 static uint32_t ppage;
+static volatile uint32_t retlens[4096 / sizeof (struct event)];
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -125,11 +126,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return openErr;
 	}
 
-	QInterest(0, 1); // enable interrupts
 	for (int i=0; i<nbuf; i++) {
 		reQueue(i);
 	}
-	QNotify(0);
 
 	ScrollInit();
 
@@ -228,13 +227,14 @@ static void reQueue(int bufnum) {
 	QSend(0, 0/*n-send*/, 1/*n-recv*/,
 		(uint32_t []){ppage + sizeof (struct event) * bufnum},
 		(uint32_t []){sizeof (struct event)},
-		(void *)bufnum);
+		&retlens[bufnum],
+		false/*wait*/);
 }
 
-void DNotified(uint16_t q, size_t len, void *tag) {
-	handleEvent(lpage[(int)tag]);
-	reQueue((int)tag);
-	QNotify(0);
+void DNotified(uint16_t q, volatile uint32_t *retlen) {
+	int bufnum = retlen - retlens;
+	handleEvent(lpage[bufnum]);
+	reQueue(bufnum);
 }
 
 void DConfigChange(void) {

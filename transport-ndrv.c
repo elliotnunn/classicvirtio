@@ -30,9 +30,7 @@ static uint8_t *gISRStatus;
 static bool gSuppressNotification;
 
 // Internal routines
-static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refCon, uint32_t intCount);
-static OSStatus queueIntBottomHalf(void *arg1, void *arg2);
-static OSStatus configIntBottomHalf(void *arg1, void *arg2);
+static InterruptMemberNumber interrupt(InterruptSetMember ist, void *refCon, uint32_t intCount);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 
 // For PCI devices, the void pointer is a RegEntryIDPtr.
@@ -113,7 +111,7 @@ bool VInit(RegEntryID *dev) {
 
 		RegistryPropertyGet(dev, "driver-ist", (void *)&ist, &size);
 		GetInterruptFunctions(ist.setID, ist.member, &oldRefCon, &oldHandler, &enabler, &disabler);
-		InstallInterruptFunctions(ist.setID, ist.member, NULL, interruptTopHalf, NULL, NULL);
+		InstallInterruptFunctions(ist.setID, ist.member, NULL, interrupt, NULL, NULL);
 
 		enabler(ist, oldRefCon);
 	}
@@ -182,21 +180,15 @@ void VNotify(uint16_t queue) {
 	SynchronizeIO();
 }
 
-void VRearm(void) {
-	gSuppressNotification = false;
-}
-
-static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refCon, uint32_t intCount) {
+static InterruptMemberNumber interrupt(InterruptSetMember ist, void *refCon, uint32_t intCount) {
 	uint8_t flags = *gISRStatus; // read flags and also deassert the interrupt
 
-	if ((flags & 1) && !gSuppressNotification) {
-		QDisarm();
-		gSuppressNotification = true;
-		QueueSecondaryInterruptHandler(queueIntBottomHalf, NULL, NULL, NULL);
+	if (flags & 1) {
+		QNotified();
 	}
 
 	if (flags & 2) {
-		QueueSecondaryInterruptHandler(configIntBottomHalf, NULL, NULL, NULL);
+		DConfigChange();
 	}
 
 	if (flags & 3) {
@@ -204,16 +196,6 @@ static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refC
 	} else {
 		return kIsrIsNotComplete;
 	}
-}
-
-static OSStatus queueIntBottomHalf(void *arg1, void *arg2) {
-	QNotified();
-	return noErr;
-}
-
-static OSStatus configIntBottomHalf(void *arg1, void *arg2) {
-	DConfigChange();
-	return noErr;
 }
 
 // Open Firmware and Mac OS have already assigned and mapped the BARs

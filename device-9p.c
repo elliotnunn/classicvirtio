@@ -202,8 +202,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
-void DNotified(uint16_t q, size_t len, void *tag) {
-	QueueNotified9(q, len, tag); // maybe dependency injection would be better
+void DNotified(uint16_t q, volatile uint32_t *retlen) {
 }
 
 void DConfigChange(void) {
@@ -243,7 +242,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		VFail();
 		return openErr;
 	}
-	QInterest(0, 1);
+
 
 	// Start the 9P layer
 	int err9;

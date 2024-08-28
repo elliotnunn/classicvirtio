@@ -3,7 +3,6 @@
 
 // A synchronous 9P2000.u interface backing onto Virtio.
 // Functions return true on failure.
-// Takes over the Virtio interface, implements DNotified and DConfigChange.
 
 // Track use of FID 0-31 and automatically clunk when reuse is attempted
 
@@ -244,4 +243,3 @@ int Clunk9(uint32_t fid);
 int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Fsync9(uint32_t fid);
-void QueueNotified9(uint16_t q, size_t len, void *tag);

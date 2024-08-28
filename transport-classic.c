@@ -24,9 +24,8 @@ struct goldfishPIC {
 	uint32_t enable; // write bitmask
 }; // platform native byte order
 
-static long interruptTopHalf(void);
+static long interrupt(void);
 static long interruptCompleteStub(void);
-static void configIntBottomHalf(void);
 
 // Globals declared in transport.h, define here
 void *VConfig;
@@ -34,15 +33,12 @@ uint16_t VMaxQueues;
 
 static volatile struct virtioMMIO *device;
 static volatile struct goldfishPIC *pic;
-static uint32_t picmask;
-
-static bool qnotifying, cnotifying;
 
 // Coexists in a queue with all the Virtio devices on this same board
 static struct SlotIntQElement slotInterrupt = {
 	.sqType = sIQType,
 	.sqPrio = 20, // do before the "backstop"
-	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptTopHalf),
+	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interrupt),
 };
 
 // An extra interrupt handler that returns "1" to prevent a dsBadSlotInt
@@ -52,23 +48,11 @@ static struct SlotIntQElement slotInterruptBackstop = {
 	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptCompleteStub),
 };
 
-static struct DeferredTask queueDeferredTask = {
-	.qType = dtQType,
-	.dtAddr = CALLIN68K_C_ARG0_GLOBDEF(QNotified),
-};
-
-static struct DeferredTask configDeferredTask = {
-	.qType = dtQType,
-	.dtAddr = CALLIN68K_C_ARG0_GLOBDEF(configIntBottomHalf),
-};
-
 // returns true for OK
 bool VInit(RegEntryID *id) {
 	// Work around a shortcoming in global initialisation
 	int slotnum = id->contents[0];
 	int devindex = id->contents[1];
-
-	picmask = 1 << devindex;
 
 	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
 	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
@@ -184,24 +168,21 @@ void VNotify(uint16_t queue) {
 	SynchronizeIO();
 }
 
-static long interruptTopHalf(void) {
+static long interrupt(void) {
 	// Ignore the Goldfish for now, just check the Virtio registers for an
 	// interrupt, and lower it if needed
 	uint32_t flags = device->interruptStatus;
+
+	if (flags & 1) {
+		QNotified();
+	}
+
+	if (flags & 2) {
+		DConfigChange();
+	}
+
 	SynchronizeIO();
 	if (flags) device->interruptACK = flags;
-	SynchronizeIO();
-
-	if ((flags & 1) && !qnotifying) {
-		QDisarm();
-		qnotifying = true;
-		DTInstall(&queueDeferredTask);
-	}
-
-	if ((flags & 2) && !cnotifying) {
-		cnotifying = true;
-		DTInstall(&configDeferredTask);
-	}
 
 	// We have lowered the interrupt for this Virtio device.
 	// Pretend we handled nothing, to continue down the handler chain.
@@ -210,17 +191,7 @@ static long interruptTopHalf(void) {
 
 // Interrupt handler chain ends here
 // Defensive: previously we tried to test for pending interrupts and return 1
-// from interruptTopHalf, but we got occasional dsBadSlotInt crashes.
+// from interrupt, but we got occasional dsBadSlotInt crashes.
 static long interruptCompleteStub(void) {
 	return 1; // "did handle"
-}
-
-static void configIntBottomHalf(void) {
-	cnotifying = false;
-	DConfigChange();
-}
-
-// Interrupts need to be explicitly reenabled after a notification
-void VRearm(void) {
-	qnotifying = false;
 }

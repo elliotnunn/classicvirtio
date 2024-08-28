@@ -229,7 +229,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		VFail();
 		return openErr;
 	}
-	QInterest(0, 1); // enable interrupts
 
 	// Probe the disk
 	struct config *config = VConfig;
@@ -276,10 +275,7 @@ static OSErr ioCall(struct IOParam *pb) {
 		phys[1+n] = pfixedbuf + offsetof(struct fixedbuf, reply);
 	 	size[1+n] = sizeof(fixedbuf->reply);
 
-		volatile bool waiting = true;
-		QSend(0, 1/*n_out*/, n+1/*n_in*/, phys, size, &waiting);
-		QNotify(0);
-		while (waiting) {}
+		QSend(0, 1/*n_out*/, n+1/*n_in*/, phys, size, NULL, true/*wait*/);
 
 		if (fixedbuf->reply != 0) {
 			panic("bad reply");
@@ -376,8 +372,7 @@ void probePartitions(uint32_t *firstblock, uint32_t *numblocks) {
 	}
 }
 
-void DNotified(uint16_t q, size_t len, void *tag) {
-	*(volatile bool *)tag = false; // clear "waiting"
+void DNotified(uint16_t q, volatile uint32_t *retlen) {
 }
 
 void DConfigChange(void) {

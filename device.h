@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 // Device has finished with a buffer
-void DNotified(uint16_t q, size_t len, void *tag);
+void DNotified(uint16_t q, volatile uint32_t *retlen);
 
 // Device-specific configuration struct has changed
 void DConfigChange(void);
