@@ -38,6 +38,19 @@ void InitLog(void) {
 void _putchar(char character) {
 	static bool newline = true;
 	if (newline) {
+		// Get the OS 9.2 boot progress string if possible
+		char *em = *(char **)0x2b6; // Expanded Memory
+		if (*(long *)(em + 2) >= 0x328) {
+			char *str = *(char **)(em + 0x324);
+			if (str) {
+				*reg = '[';
+				for (int i=0; i<str[0]; i++) {
+					*reg = str[1+i];
+				}
+				*reg = ']';
+			}
+		}
+
 		const char *p = LogPrefix;
 		while (*p) *reg = *p++;
 	}
