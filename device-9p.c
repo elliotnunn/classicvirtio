@@ -521,6 +521,7 @@ static void getBootBlocks(void) {
 
 			if (len > 1024) len = 1024;
 			MF.Read(&fcb, bootBlocks, content+off+4, len, NULL);
+			// memcpy(bootBlocks+8, "CB", 2); // magic "page 2 flags" -> load MacsBug ASAP
 			goto done; // success
 		}
 		goto done; // no boot 3 resource
@@ -907,7 +908,6 @@ static void updateKnownLength(struct MyFCB *fcb, int32_t length) {
 }
 
 static OSErr fsOpen(struct HIOParam *pb) {
-// 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 	pb->ioRefNum = 0;
 
 	struct MyFCB *fcb = UnivAllocateFile();
