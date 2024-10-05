@@ -656,7 +656,8 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 		// Software commonly calls with index 1, 2, 3 etc
 		// Cache Readdir9 to avoid quadratically relisting the directory per-call
-		// An improvement might be to have multiple caches
+		// An improvement might be to have multiple caches,
+		// but relists aren't a big contributor to boot time
 		static char scratch[2048];
 		static long lastCNID;
 		static int lastIdx;
