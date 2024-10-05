@@ -46,6 +46,8 @@ enum {
 static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
 static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
 static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name);
+static int flagsToText(char *buf, const char finfo[16], const char fxinfo[16]);
+static void textToFlags(char finfo[16], char fxinfo[16], const char * text, int len);
 static uint32_t fidof(struct MyFCB *fcb);
 // no need to prototype init3, open3 etc... they are used once at bottom of file
 
@@ -184,7 +186,6 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 	}
 
 	// Costly: read the Finder info
-	// Unanswered question: what is the difference between four-nulls and four-question-marks?
 	if (fields & MF_FINFO) {
 		char ipath[MAXNAME];
 		sprintf(ipath, "../%s.idump", name);
@@ -192,8 +193,12 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 		if (!WalkPath9(fid, FINFOFID, ipath)
 				&&
 				!Lopen9(FINFOFID, O_RDONLY, NULL, NULL)) {
-			Read9(FINFOFID, attr->finfo, 0, 8, NULL);
+			uint32_t len = 0;
+			char buffer[512];
+			Read9(FINFOFID, buffer, 0, sizeof buffer-1, &len);
 			Clunk9(FINFOFID);
+			buffer[len] = 0;
+			textToFlags(attr->finfo, attr->fxinfo, buffer, len);
 		}
 	}
 
@@ -218,7 +223,9 @@ int fsetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, con
 		err = Lcreate9(FINFOFID, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL);
 		if (err) return err;
 
-		err = Write9(FINFOFID, attr->finfo, 0, 8, NULL);
+		char blob[512];
+		int len = flagsToText(blob, attr->finfo, attr->fxinfo);
+		err = Write9(FINFOFID, blob, 0, len, NULL);
 		if (err) return err;
 
 		Clunk9(FINFOFID);
@@ -472,6 +479,120 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 		Write9(CLEANRECFID, &scstat, 0, sizeof scstat, NULL);
 		Clunk9(CLEANRECFID);
 	}
+}
+
+struct P {
+	long val;
+	const char *name;
+};
+
+static const struct P FLAGNAMES[] = {
+	{0x000e, "kColor7"},
+	{0x0006, "kColor3"},
+	{0x000a, "kColor5"},
+	{0x000c, "kColor6"},
+	{0x0002, "kColor1"},
+	{0x0004, "kColor2"},
+	{0x0008, "kColor4"},
+	{0x0040, "kIsShared"},
+	{0x0080, "kHasNoINITs"},
+	{0x0100, "kHasBeenInited"},
+	{0x0400, "kHasCustomIcon"},
+	{0x0800, "kIsStationery"},
+	{0x1000, "kNameLocked"},
+	{0x2000, "kHasBundle"},
+	{0x4000, "kIsInvisible"},
+	{0x8000, "kIsAlias"},
+	{0}
+};
+
+static int flagsToText(char *buf, const char finfo[16], const char fxinfo[16]) {
+	char *base = buf;
+	// type and creator code
+	memcpy(buf, finfo, 8);
+	if (!memcmp(buf, "\0\0\0\0", 4)) {
+		memset(buf, '?', 4);
+	}
+	if (!memcmp(buf+4, "\0\0\0\0", 4)) {
+		memset(buf+4, '?', 4);
+	}
+	buf += 8;
+	*buf++ = '\n';
+
+	if (finfo[9] & 0x0e) {
+		buf = stpcpy(buf, "kColor!\n");
+		buf[-2] = '0' + ((finfo[9] >> 1) & 7);
+	}
+	if (finfo[9] & 0x40) {
+		buf = stpcpy(buf, "kIsShared\n");
+	}
+	if (finfo[9] & 0x80) {
+		buf = stpcpy(buf, "kHasNoINITs\n");
+	}
+	if (finfo[8] & 0x01) {
+		buf = stpcpy(buf, "kHasBeenInited\n");
+	}
+	if (finfo[8] & 0x02) {
+		buf = stpcpy(buf, "aoce-letter\n"); // need a better name
+	}
+	if (finfo[8] & 0x04) {
+		buf = stpcpy(buf, "kHasCustomIcon\n");
+	}
+	if (finfo[8] & 0x08) {
+		buf = stpcpy(buf, "kIsStationery\n");
+	}
+	if (finfo[8] & 0x10) {
+		buf = stpcpy(buf, "kNameLocked\n");
+	}
+	if (finfo[8] & 0x20) {
+		buf = stpcpy(buf, "kHasBundle\n");
+	}
+	if (finfo[8] & 0x40) {
+		buf = stpcpy(buf, "kIsInvisible\n");
+	}
+	if (finfo[8] & 0x80) {
+		buf = stpcpy(buf, "kIsAlias\n");
+	}
+	return buf - base;
+}
+
+static void textToFlags(char finfo[16], char fxinfo[16], const char *text, int len) {
+	if (len < 8) {
+		return;
+	}
+
+	memcpy(finfo, text, 8);
+	if (!memcmp(finfo, "????", 4)) {
+		memset(finfo, 0, 4);
+	}
+	if (!memcmp(finfo+4, "????", 4)) {
+		memset(finfo+4, 0, 4);
+	}
+
+	long flags = 0;
+	int i = 9;
+	while (i < len) { // for each line
+		for (const struct P *p = FLAGNAMES; p->val; p++) { // for each match
+			const char *n = p->name;
+			int l = 0;
+			for (;;) { // for each char
+				if (n[l] == 0 && text[i+l] == '\n') {
+					flags |= p->val;
+					i += l + 1;
+					goto nextline;
+				} else if (n[l] != text[i+l]) {
+					goto nextmatch;
+				}
+				l++;
+			}
+		nextmatch:
+		}
+		i++; // skate over chars until return to matches
+	nextline:
+	}
+
+	finfo[8] = flags >> 8;
+	finfo[9] = flags;
 }
 
 static uint32_t fidof(struct MyFCB *fcb) {
