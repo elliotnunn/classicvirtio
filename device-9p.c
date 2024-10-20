@@ -306,6 +306,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	printf("System Folder: %s\n", IsErr(systemFolder) ? "absent" : "present");
 	if (!IsErr(systemFolder)) {
 		getBootBlocks();
+		// Suppress Disk First Aid dialog (only useful on HFS disks)
+		MF.Del(ROOTFID, "Shutdown Check", false);
 	}
 
 	printf("File Manager: %s\n", GetVCBQHdr()->qHead != (void *)-1 ? "present" : "absent");
