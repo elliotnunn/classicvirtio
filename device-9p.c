@@ -29,7 +29,6 @@
 #include "paramblkprint.h"
 #include "patch68k.h"
 #include "9p.h"
-#include "timing.h"
 #include "transport.h"
 #include "unicode.h"
 #include "universalfcb.h"
@@ -93,7 +92,6 @@ static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static OSErr controlStatusDispatch(long selector, void *pb);
 
-static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 extern struct Qid9 root;
 static char bootBlocks[1024];
@@ -1532,13 +1530,6 @@ static int32_t mactime(int64_t unixtime) {
 }
 
 static long fsCall(void *pb, long selector) {
-	static unsigned char hdr;
-	if (hdr++ == 0) {
-		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/(hfsTimer+1), relistTimer*100/(hfsTimer+1));
-	}
-
-	TIMEFUNC(hfsTimer);
-
 	// Hideously nasty stack-sniffing debug code
 // 	void *top = LMGetMemTop() - 32;
 // 	if (top > stack+512) top = stack+512;
