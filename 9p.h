@@ -180,7 +180,8 @@ enum {
 
 enum {
 	NOFID = -1,
-	MAXNAME = 128, // including the null terminator
+	MAXNAME = 94, // including the null terminator,
+	// the largest UTF-8 name representable as 31-byte Mac Roman
 };
 
 extern uint32_t Max9;

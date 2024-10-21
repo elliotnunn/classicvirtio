@@ -74,14 +74,12 @@ static void installExtFS(void);
 static void ensureFutureMount(void);
 static void lateBootHook(void);
 static void getBootBlocks(void);
-static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid);
-static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid);
+static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
+static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
 static void updateKnownLength(struct MyFCB *fcb, int32_t length);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
-static int32_t qid2cnid(struct Qid9 qid);
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
-static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
@@ -250,7 +248,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return openErr;
 	}
 
-	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
+	struct Qid9 rootQID;
+	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &rootQID)) != 0) {
 		return openErr;
 	}
 
@@ -267,6 +266,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	Mkdir9(ROOTFID, 0777, 0, ".classicvirtio.nosync.noindex", NULL);
 	if (WalkPath9(ROOTFID, DOTDIRFID, ".classicvirtio.nosync.noindex"))
 		panic("failed walk dotdir");
+	CatalogInit(rootQID);
 
 	// Read mount_tag from config space into a C string
 	// (Suffixed with :1 or :2 etc to force a specific multifork format)
@@ -284,13 +284,13 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	printf("Volume name: %s\n", name);
 	mr27name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
-	CatalogInit(name);
+	CatalogSet(2, 1, name, true/*definitive case*/);
 
 	// Need unique stable creation date, used pervasively as an ID, from inode#
 	vcb.vcbCrDate = 0x80000000 ^
-		(root.path & 0x3fffffff) ^
-		((root.path >> 30) & 0x3fffffff) ^
-		((root.path >> 60) & 0xf);
+		(rootQID.path & 0x3fffffff) ^
+		((rootQID.path >> 30) & 0x3fffffff) ^
+		((rootQID.path >> 60) & 0xf);
 
 	// Choose a multifork format by probing the fs contents
 	MFChoose(formathint);
@@ -299,7 +299,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	installDrive();
 
-	int32_t systemFolder = CatalogWalk(FID1, 2 /*cnid*/, "\pSystem Folder");
+	int32_t systemFolder = CatalogWalk(FID1, 2 /*cnid*/, "\pSystem Folder", NULL, NULL);
 	vcb.vcbFndrInfo[0] = IsErr(systemFolder) ? 0 : systemFolder;
 	printf("System Folder: %s\n", IsErr(systemFolder) ? "absent" : "present");
 	if (!IsErr(systemFolder)) {
@@ -468,7 +468,8 @@ static void lateBootHook(void) {
 // At this stage we are a drive, not a volume, so there is only block-level access
 // ... but we need to access a resource fork ... so do some funky stuff.
 static void getBootBlocks(void) {
-	int32_t cnid = CatalogWalk(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem");
+	char name[MAXNAME];
+	int32_t cnid = CatalogWalk(FID1, vcb.vcbFndrInfo[0] /*system folder*/, "\pSystem", NULL, name);
 	if (IsErr(cnid)) return;
 
 	struct MyFCB fcb = {
@@ -476,7 +477,7 @@ static void getBootBlocks(void) {
 		.fcbFlags = fcbResourceMask,
 	};
 
-	if (MF.Open(&fcb, cnid, FID1, getDBName(cnid))) return;
+	if (MF.Open(&fcb, cnid, FID1, name)) return;
 
 	uint32_t content;
 	if (MF.Read(&fcb, &content, 0, 4, NULL)) goto done;
@@ -592,7 +593,7 @@ static OSErr fsGetVolInfo(struct XVolumeParam *pb) {
 	// Count contained files
 	pb->ioVNmFls = 0;
 
-	int err = CatalogWalk(FID1, cnid, "");
+	int err = CatalogWalk(FID1, cnid, NULL, NULL, NULL);
 	if (err < 0) return err;
 
 	if (Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
@@ -649,7 +650,8 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	int idx = pb->ioFDirIndex;
 	if (idx<0 && !catalogCall) idx=0; // make named GetFInfo calls behave right
 
-	int32_t cnid = pbDirID(pb);
+	int32_t parent, cnid = pbDirID(pb);
+	char name[MAXNAME];
 
 	if (idx > 0) {
 		printf("Find by: directory+index\n");
@@ -666,13 +668,12 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			if (IsErr(CatalogWalk(FIDPERSIST, cnid, ""))) return fnfErr;
+			if (IsErr(CatalogWalk(FIDPERSIST, cnid, NULL, NULL, NULL))) return fnfErr;
 			if (Lopen9(FIDPERSIST, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
 			InitReaddir9(FIDPERSIST, scratch, sizeof scratch);
 			lastCNID = cnid;
 		}
 
-		char name[MAXNAME];
 		struct Qid9 qid;
 
 		// Fast-forward
@@ -697,39 +698,36 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			lastIdx++;
 		}
 
-		int32_t childcnid = qid2cnid(qid);
-		setDB(childcnid, cnid, name);
-		cnid = childcnid;
-
-		CatalogWalk(FID1, cnid, "");
+		parent = cnid;
+		cnid = QID2CNID(qid);
+		CatalogSet(cnid, parent, name, true/*definitive case*/);
+		WalkPath9(FIDPERSIST, FID1, name);
 	} else if (idx == 0) {
 		printf("Find by: directory+path\n");
-		cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+		cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr, &parent, name);
 		if (IsErr(cnid)) return cnid;
 	} else {
 		printf("Find by: directory only\n");
-		cnid = CatalogWalk(FID1, cnid, "\p");
+		cnid = CatalogWalk(FID1, cnid, NULL, &parent, name);
 		if (IsErr(cnid)) return cnid;
 	}
 
-	printf("Found: "); cnidPrint(cnid); printf("\n");
-
 	// A special return field: don't change the field, just follow the pointer
 	if ((idx != 0) && (pb->ioNamePtr != NULL)) {
-		mr31name(pb->ioNamePtr, getDBName(cnid));
+		mr31name(pb->ioNamePtr, name);
 	}
 
 	if (IsDir(cnid)) {
 		if (!catalogCall) return fnfErr; // GetFileInfo predates directories
-		setDirPBInfo((void *)pb, cnid, FID1);
+		setDirPBInfo((void *)pb, cnid, parent, name, FID1);
 	} else {
-		setFilePBInfo((void *)pb, cnid, FID1);
+		setFilePBInfo((void *)pb, cnid, parent, name, FID1);
 	}
 
 	return noErr;
 }
 
-static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
+static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid) {
 	// 9P/Unix lack a call to count the contents of a directory, so list it
 	int valence=0;
 	char childname[MAXNAME];
@@ -744,7 +742,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	Clunk9(FID1);
 
 	struct MFAttr attr;
-	MF.DGetAttr(cnid, fid, getDBName(cnid), MF_FINFO, &attr);
+	MF.DGetAttr(cnid, fid, name, MF_FINFO, &attr);
 
 	// Clear fields from ioFlAttrib onward
 	memset((char *)pb + 30, 0, 100 - 30);
@@ -756,12 +754,12 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
 	pb->ioDrNmFls = valence;
 	pb->ioDrCrDat = pb->ioDrMdDat = mactime(attr.unixtime);
 	memcpy(&pb->ioDrFndrInfo, attr.fxinfo, sizeof pb->ioDrFndrInfo);
-	pb->ioDrParID = getDBParent(cnid);
+	pb->ioDrParID = pcnid;
 }
 
-static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
+static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid) {
 	struct MFAttr attr;
-	MF.FGetAttr(cnid, fid, getDBName(cnid), MF_DSIZE|MF_RSIZE|MF_TIME|MF_FINFO, &attr);
+	MF.FGetAttr(cnid, fid, name, MF_DSIZE|MF_RSIZE|MF_TIME|MF_FINFO, &attr);
 
 	// Clear shared "FileInfo" fields, from ioFlAttrib onward
 	memset((char *)pb + 30, 0, 80 - 30);
@@ -792,14 +790,14 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
 	// Clear only "CatInfo" fields, from ioFlBkDat onward
 	memset((char *)pb + 80, 0, 108 - 80);
 	memcpy(&pb->ioFlXFndrInfo, attr.fxinfo, sizeof pb->ioFlXFndrInfo);
-	pb->ioFlParID = getDBParent(cnid);
+	pb->ioFlParID = pcnid;
 }
 
 // Set creator and type on files only
 // TODO set timestamps, the attributes byte (comes with AppleDouble etc)
 static OSErr fsSetFileInfo(struct HFileInfo *pb) {
-	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	char name[MAXNAME];
+	int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, NULL, name);
 	if (IsErr(cnid)) return cnid;
 
 	// TODO: mtime setting
@@ -808,9 +806,9 @@ static OSErr fsSetFileInfo(struct HFileInfo *pb) {
 	memcpy(attr.fxinfo, &pb->ioFlXFndrInfo, sizeof pb->ioFlXFndrInfo); // same field as ioDrFndrInfo
 
 	if (IsDir(cnid)) {
-		MF.DSetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
+		MF.DSetAttr(cnid, FID1, name, MF_FINFO, &attr);
 	} else {
-		MF.FSetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
+		MF.FSetAttr(cnid, FID1, name, MF_FINFO, &attr);
 	}
 
 	return noErr;
@@ -824,7 +822,7 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 	if (pb->ioTrap & 0x200) {
 		// HSetVol: any directory is fair game,
 		// so check that the path exists and is really a directory
-		int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
+		int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, NULL, NULL);
 		if (IsErr(cnid)) return cnid;
 		if (!IsDir(cnid)) return dirNFErr;
 		Clunk9(FID1);
@@ -866,8 +864,9 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
 
-	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	char name[MAXNAME];
+	int32_t cnid, parent;
+	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, &parent, name);
 	if (!IsErr(cnid)) {
 		// The target exists
 		if (cnid == 2) {
@@ -876,28 +875,27 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 			spec->name[0] = 0;
 		} else {
 			spec->vRefNum = vcb.vcbVRefNum;
-			spec->parID = getDBParent(cnid);
-			mr31name(spec->name, getDBName(cnid));
+			spec->parID = parent;
+			mr31name(spec->name, name);
 		}
-
 		return noErr;
+	} else if (cnid == fnfErr) {
+		// The target doesn't (yet) exist
+		unsigned char path[256], leaf[256];
+		if (pb->ioNamePtr == NULL) return dirNFErr;
+		pathSplitLeaf(pb->ioNamePtr, path, leaf);
+		if (leaf[0] == 0) return dirNFErr;
+
+		cnid = CatalogWalk(FID1, pbDirID(pb), path, NULL, NULL);
+		if (IsErr(cnid)) return dirNFErr; // return cnid;
+
+		spec->vRefNum = vcb.vcbVRefNum;
+		spec->parID = cnid;
+		pstrcpy(spec->name, leaf);
+		return fnfErr;
+	} else {	
+		return cnid;
 	}
-
-	// The target doesn't (yet) exist
-	unsigned char path[256], leaf[256];
-	if (pb->ioNamePtr == NULL) return dirNFErr;
-	pathSplitLeaf(pb->ioNamePtr, path, leaf);
-	if (leaf[0] == 0) return dirNFErr;
-
-	cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, path);
-	if (IsErr(cnid)) return dirNFErr; // return cnid;
-
-	spec->vRefNum = vcb.vcbVRefNum;
-	spec->parID = cnid;
-	pstrcpy(spec->name, leaf);
-
-	return fnfErr;
 }
 
 // Update the EOF of all duplicate FCBs
@@ -916,13 +914,14 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		return tmfoErr;
 	}
 
-	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
+	int32_t cnid, parent;
+	char name[MAXNAME];
+	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, &parent, name);
 	if (IsErr(cnid)) return cnid;
 	if (IsDir(cnid)) return fnfErr;
 
 	struct MFAttr attr = {};
-	MF.FGetAttr(cnid, FID1, getDBName(cnid), MF_FINFO, &attr);
+	MF.FGetAttr(cnid, FID1, name, MF_FINFO, &attr);
 
 	fcb->fcbFlNm = cnid;
 	fcb->fcbFlags =
@@ -930,11 +929,11 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		(fcbWriteMask * (pb->ioPermssn != fsRdPerm));
 	fcb->fcbVPtr = &vcb;
 	fcb->fcbClmpSize = 512;
-	fcb->fcbDirID = getDBParent(cnid);
+	fcb->fcbDirID = parent;
 	memcpy(&fcb->fcbFType, attr.finfo, 4); // 4char type code
-	mr31name(fcb->fcbCName, getDBName(cnid));
+	mr31name(fcb->fcbCName, name);
 
-	int lerr = MF.Open(fcb, cnid, FID1, getDBName(cnid));
+	int lerr = MF.Open(fcb, cnid, FID1, name);
 	if (lerr) fcb->fcbFlNm = 0; // don't leak an FCB on error
 	if (lerr == EPERM) return permErr;
 	else if (lerr == ENOENT) return fnfErr;
@@ -1155,22 +1154,9 @@ static OSErr fsWrite(struct IOParam *pb) {
 }
 
 static OSErr fsCreate(struct HFileParam *pb) {
-	int err = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
-
-	if (!IsErr(err)) { // actually found a file
-		return dupFNErr;
-	} else if (err != fnfErr) {
-		return err;
-	}
-
 	unsigned char dir[256], name[256];
 	pathSplitLeaf(pb->ioNamePtr, dir, name);
-
 	if (name[0] == 0) return bdNamErr;
-
-	int32_t parentCNID = CatalogWalk(FID1, pbDirID(pb), dir);
-
-	if (IsErr(parentCNID)) return dirNFErr;
 
 	char uniname[MAXNAME];
 	int n=0;
@@ -1184,23 +1170,42 @@ static OSErr fsCreate(struct HFileParam *pb) {
 	}
 	uniname[n++] = 0;
 
+	int32_t parent = CatalogWalk(FID1, pbDirID(pb), dir, NULL, NULL);
+	if (IsErr(parent)) return parent;
+	else if (!IsDir(parent)) return dirNFErr;
+
 	if ((pb->ioTrap & 0xff) == (_Create & 0xff)) {
-		if (Lcreate9(FID1, O_CREAT|O_EXCL, 0666, 0, uniname, NULL, NULL) || Clunk9(FID1)) return ioErr;
+		switch (Lcreate9(FID1, O_WRONLY|O_CREAT|O_EXCL, 0666, 0, uniname, NULL, NULL)) {
+		case 0:
+			break;
+		case EEXIST:
+			return dupFNErr;
+		default:
+			return ioErr;
+		}
 	} else {
 		struct Qid9 qid;
-		if (Mkdir9(FID1, 0777, 0, uniname, &qid) || Clunk9(FID1)) return ioErr;
-
+		switch (Mkdir9(FID1, 0777, 0, uniname, &qid)) {
+		case 0:
+			break;
+		case EEXIST:
+			return dupFNErr;
+		default:
+			return ioErr;
+		}
+		
 		// DirCreate returns DirID, and therefore we must put it in the database
-		int32_t cnid = qid2cnid(qid);
-		setDB(cnid, parentCNID, uniname);
+		int32_t cnid = QID2CNID(qid);
+		CatalogSet(cnid, parent, uniname, true/*definitive case*/);
 		pb->ioDirID = cnid;
 	}
-
 	return noErr;
 }
 
-static OSErr fsDelete(struct IOParam *pb) {
-	int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
+static OSErr fsDelete(struct HFileParam *pb) {
+	int32_t cnid, parent;
+	char name[MAXNAME];
+	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, &parent, name);
 	if (IsErr(cnid)) return cnid;
 
 	// Do not allow removal of open files
@@ -1208,7 +1213,7 @@ static OSErr fsDelete(struct IOParam *pb) {
 		return fBsyErr;
 	}
 
-	int err = MF.Del(FID1, getDBName(cnid), IsDir(cnid));
+	int err = MF.Del(FID1, name, IsDir(cnid));
 	if (err == EEXIST || err == ENOTEMPTY) return fBsyErr;
 	else if (err) return ioErr;
 
@@ -1217,45 +1222,40 @@ static OSErr fsDelete(struct IOParam *pb) {
 
 // Unlike Unix rename, this is not permitted to overwrite an existing file
 static OSErr fsRename(struct IOParam *pb) {
-	enum {CHILD=FID1, PARENT=FID2, JUNK=FID3};
-	int32_t parentCNID, childCNID;
+	int32_t cnid, parent;
+	char name[MAXNAME];
+	cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, &parent, name);
+	if (IsErr(cnid)) return cnid;
+	WalkPath9(FID1, FID1, ".."); // actually we are interested in the parent
+	WalkPath9(FID1, FID2, ""); // and we need a junk FID to play with
 
-	// The original file exists
-	childCNID = CatalogWalk(CHILD, pbDirID(pb), pb->ioNamePtr);
-	if (IsErr(childCNID)) return childCNID;
-	parentCNID = getDBParent(childCNID);
-
-	char oldNameU[MAXNAME], newNameU[MAXNAME];
-	unsigned char newNameR[MAXNAME];
-
-	// The old name is already in Unicode, and correct thanks to CatalogWalk()
-	strcpy(oldNameU, getDBName(childCNID));
+	char newNameU[MAXNAME];
+	unsigned char newNameR[256];
 
 	// The new name requires conversion
-	pathSplitLeaf(pb->ioMisc, NULL, newNameR); // remove extraneous colons
+	pathSplitLeaf((const unsigned char *)pb->ioMisc, NULL, newNameR); // remove extraneous colons
 	if (newNameR[0] > 31 || newNameR[0] < 1) return bdNamErr;
 	utf8name(newNameU, newNameR);
 
 	// Special case: rename the disk
-	if (childCNID == 2) {
+	if (cnid == 2) {
 		if (newNameR[0] > 27) return bdNamErr;
 		pstrcpy(vcb.vcbVN, newNameR);
-		setDB(2, 1, newNameU);
+		CatalogSet(2, 1, newNameU, true/*definitive case*/);
 		return noErr;
 	}
 
-	// Disallow a duplicate-looking filename
-	// (The Unix/9P behaviour is to overwrite the destination silently)
-	if (!IsErr(CatalogWalk(JUNK, parentCNID, newNameR))) return dupFNErr;
+	// Reserve the new filename atomically
+	if (Lcreate9(FID2, O_WRONLY|O_CREAT|O_EXCL, 0644, 0, newNameU, NULL, NULL)) {
+		return dupFNErr;
+	}
+	Clunk9(FID2);
+	if (MF.Move(FID1, name, FID1, newNameU)) {
+		return ioErr; // really should've worked!
+	}
 
-	// Need a PARENT for the Trenameat call
-	WalkPath9(CHILD, PARENT, "..");
-
-	int lerr = MF.Move(PARENT, oldNameU, PARENT, newNameU);
-	if (lerr) return ioErr;
-
-	// Commit to the rename, so correct the database
-	setDB(childCNID, parentCNID, newNameU);
+	// Update the database
+	CatalogSet(cnid, parent, newNameU, true/*definitive case*/);
 
 	return noErr;
 }
@@ -1270,28 +1270,34 @@ static OSErr fsRename(struct IOParam *pb) {
 // Must not overwrite an existing file
 static OSErr fsCatMove(struct CMovePBRec *pb) {
 	// Move the file/directory with cnid1...
-	int32_t cnid1 = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr);
+	char name[MAXNAME];
+	int32_t cnid1 = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, NULL, name);
 	if (IsErr(cnid1)) return cnid1;
 	if (cnid1 == 2) return bdNamErr; // can't move root
-	const char *name = getDBName(cnid1);
 
 	// ...into the directory with cnid2.
 	// Subtle bug: if the ioNewName is an absolute path to a *different disk*,
 	// browse will nontheless carry on searching for the subpath in *this disk*.
-	int32_t cnid2 = CatalogWalk(FID2, pb->ioNewDirID, pb->ioNewName);
+	int32_t cnid2 = CatalogWalk(FID2, pb->ioNewDirID, pb->ioNewName, NULL, NULL);
 	if (IsErr(cnid2)) return cnid2;
 	if (!IsDir(cnid2)) return bdNamErr;
 
-	// Disallow a duplicate-looking filename
-	// (The Unix/9P behaviour is to overwrite the destination silently)
-	unsigned char romanname[32];
-	mr31name(romanname, name);
-	if (!IsErr(CatalogWalk(FID3, cnid2, romanname))) return dupFNErr; // FID3 is junk
+	// Do it exclusively
+	WalkPath9(FID2, FID3, "");
+	switch (Lcreate9(FID3, O_WRONLY|O_CREAT|O_EXCL, 0666, 0, name, NULL, NULL)) {
+	case 0:
+		break;
+	case EEXIST:
+		return dupFNErr;
+	default:
+		return ioErr;
+	}
+	Clunk9(FID3);
 
 	// Navigate "up" a level because 9P expects the parent fid
 	WalkPath9(FID1, FID1, "..");
 
-	int lerr = MF.Move(FID1, getDBName(cnid1), FID2, getDBName(cnid1));
+	int lerr = MF.Move(FID1, name, FID2, name);
 	if (lerr == EINVAL) return badMovErr;
 	else if (lerr) return ioErr;
 
@@ -1301,8 +1307,7 @@ static OSErr fsCatMove(struct CMovePBRec *pb) {
 // "Working directories" are a compatibility shim for apps expecting flat disks:
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
-	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, NULL, NULL);
 	if (IsErr(cnid)) return cnid;
 	if (!IsDir(cnid)) return fnfErr;
 
@@ -1349,8 +1354,7 @@ static OSErr fsCloseWD(struct WDParam *pb) {
 }
 
 static OSErr fsCreateFileIDRef(struct FIDParam *pb) {
-	int32_t cnid = pbDirID(pb);
-	cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr);
+	int32_t cnid = CatalogWalk(FID1, pbDirID(pb), pb->ioNamePtr, NULL, NULL);
 	if (IsErr(cnid)) {
 		pb->ioFileID = 0;
 		return cnid;
@@ -1364,11 +1368,11 @@ static OSErr fsCreateFileIDRef(struct FIDParam *pb) {
 }
 
 static OSErr fsResolveFileIDRef(struct FIDParam *pb) {
-	int32_t parent = getDBParent(pb->ioFileID);
-	if (parent == 0) {
+	char name[MAXNAME];
+	int32_t parent = CatalogGet(pb->ioFileID, name);
+	if (IsErr(parent)) {
 		return fidNotFound;
 	}
-	const char *name = getDBName(pb->ioFileID);
 
 	pb->ioSrcDirID = parent;
 	if (pb->ioNamePtr) {
@@ -1414,24 +1418,6 @@ static struct WDCBRec *findWD(short refnum) {
 	}
 }
 
-// Create a CNID from a 9P QID (which is a slightly adorned inode number)
-// Negative CNIDs are reserved for errors, and the 2nd MSB means "not a dir"
-// Warning: the "type" field of a Rreaddir QID is nonsense, causing this
-// function to give a garbage result, so qidTypeFix() it before calling me.
-static int32_t qid2cnid(struct Qid9 qid) {
-	if (qid.path == root.path) return 2;
-
-	int32_t cnid = 0;
-	cnid ^= (0x3fffffffULL & qid.path);
-	cnid ^= ((0x0fffffffc0000000ULL & qid.path) >> 30);
-	cnid ^= ((0xf000000000000000ULL & qid.path) >> 40); // don't forget the upper 4 bits
-	if (cnid < 16) cnid += 0x12342454; // low numbers reserved for system
-
-	if ((qid.type & 0x80) == 0) cnid |= 0x40000000;
-
-	return cnid;
-}
-
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 	if (linuxType == 4) {
 		qid.type = 0x80;
@@ -1439,29 +1425,6 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 		qid.type = 0;
 	}
 	return qid;
-}
-
-// Print a CNID to the log as a /unix/path
-static void cnidPrint(int32_t cnid) {
-	if (!LogEnable) return; // expensive
-	char big[512];
-	int remain = sizeof big;
-
-	while (cnid != 2) {
-		const char *name = getDBName(cnid);
-		int nsize = strlen(name);
-		if (remain < nsize+1) break;
-
-		remain -= nsize;
-		memcpy(big + remain, name, nsize);
-		big[--remain] = '/';
-
-		cnid = getDBParent(cnid);
-	}
-
-	if (remain == sizeof big) big[--remain] = '/'; // root is not "empty path"
-
-	printf("%.*s", sizeof big - remain, big + remain);
 }
 
 static struct DrvQEl *findDrive(short num) {

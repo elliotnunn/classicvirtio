@@ -109,10 +109,11 @@ static int close3(struct MyFCB *fcb) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
-		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, ""))) {
+		char name[MAXNAME];
+		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, (const unsigned char *)"", NULL, name))) {
 			panic("CatalogWalk failed!");
 		}
-		pushResourceFork(fcb->fcbFlNm, MAINFID, getDBName(fcb->fcbFlNm));
+		pushResourceFork(fcb->fcbFlNm, MAINFID, name);
 	}
 
 	return Clunk9(fidof(fcb));
@@ -150,10 +151,11 @@ static int seteof3(struct MyFCB *fcb, uint64_t len) {
 		for (struct MyFCB *i=UnivFirst(fcb->fcbFlNm, true); i!=NULL; i=UnivNext(fcb)) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
-		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, ""))) {
+		char name[MAXNAME];
+		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, (const unsigned char *)"", NULL, name))) {
 			panic("CatalogWalk failed!");
 		}
-		pushResourceFork(fcb->fcbFlNm, MAINFID, getDBName(fcb->fcbFlNm));
+		pushResourceFork(fcb->fcbFlNm, MAINFID, name);
 	}
 	return 0;
 }
