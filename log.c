@@ -24,6 +24,8 @@ static volatile char *nubusRegister(void); // if a NuBus Virtio console device i
 static volatile char *pciRegister(void); // if a PCI Virtio console device is found
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]); // utility for pci
 
+#define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1))
+
 void InitLog(void) {
 #if GENERATINGCFM
 	reg = pciRegister();
@@ -39,16 +41,20 @@ void _putchar(char character) {
 	static bool newline = true;
 	if (newline) {
 		// Get the OS 9.2 boot progress string if possible
-		char *em = *(char **)0x2b6; // Expanded Memory
-		if (*(long *)(em + 2) >= 0x328) {
-			char *str = *(char **)(em + 0x324);
-			if (str) {
-				*reg = '[';
-				for (int i=0; i<str[0]; i++) {
-					*reg = str[1+i];
-				}
-				*reg = ']';
+		char *em = (char *)unaligned32(0x2b6); // Expanded Memory
+		char *str;
+		if (unaligned32(em + 2)>=0x328 && (str=*(char **)(em + 0x324))!=NULL) {
+			*reg = '[';
+			for (int i=0; i<str[0]; i++) {
+				*reg = str[1+i];
 			}
+			*reg = ']';
+		} else if (*(signed char *)0x910>0) {
+			*reg = '[';
+			for (int i=0; i<*(char *)0x910; i++) {
+				*reg = *(char *)(0x911+i);
+			}
+			*reg = ']';
 		}
 
 		const char *p = LogPrefix;
