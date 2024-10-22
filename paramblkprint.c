@@ -17,7 +17,7 @@ static const char *controlname(short code);
 static const char *statusname(short code);
 static const char *drvrgestaltname(long code);
 static const char *drvrconfname(long code);
-static const char *minilang(const char *pb, unsigned short selector, unsigned short status);
+static const char *minilang(const char *pb, unsigned short selector, short status);
 
 char *PBPrint(void *pb, unsigned short selector, short errcode) {
 	static char blob[4096];
@@ -392,7 +392,7 @@ static const char *drvrconfname(long code) {
 }
 
 // No need to worry about the "usual" fields like ioTrap
-static const char *minilang(const char *pb, unsigned short selector, unsigned short status) {
+static const char *minilang(const char *pb, unsigned short selector, short status) {
 	switch (selector & 0xf0ff) {
 	case 0xa000: // Open
 		if (status > 0) {
