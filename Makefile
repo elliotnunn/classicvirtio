@@ -3,7 +3,7 @@
 
 # Build the drivers (PPC and 68k) with:
 #     PATH=Retro68-build/toolchain/bin make
-all: classic ndrv build/test/test
+all: classic ndrv build/test
 classic: build/classic/declrom
 ndrv: build/ndrv/ndrvloader
 
@@ -12,7 +12,7 @@ ndrv: build/ndrv/ndrvloader
 .SECONDARY:
 
 # Create subdirectories for the build to go into
-$(shell mkdir -p build/classic build/ndrv build/test)
+$(shell mkdir -p build/classic build/ndrv)
 
 # The supported Virtio devices for each Mac platform (see device-9p.c etc)
 #     "CLASSIC" means a 68k DRVR for a NuBus device under qemu-system-m68k
@@ -24,7 +24,6 @@ DEVICES_NDRV = block 9p input
 SUPPORT := $(filter-out device-%.c,$(wildcard *.c))
 SUPPORT := $(filter-out slotexec-%.c,$(SUPPORT)) # special files
 SUPPORT := $(filter-out ndrvloader.c,$(SUPPORT)) # special file
-SUPPORT := $(filter-out test.c,$(SUPPORT)) # special file
 SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(SUPPORT))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 
@@ -101,6 +100,6 @@ build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 
 ############################### TEST APP ###############################
 
-build/test/test: test.c
-	m68k-apple-macos-gcc $(CDEFS) -o $@.dsk $<
-	DumpHFS $@.dsk build/test || echo temporary hack pending implementation of AppleDouble
+build/test: $(wildcard test/*.c)
+	m68k-apple-macos-gcc $(CDEFS) -o $@.dsk $^
+	DumpHFS $@.dsk build/ || echo temporary hack pending implementation of AppleDouble
