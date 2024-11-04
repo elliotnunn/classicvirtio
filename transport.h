@@ -14,6 +14,7 @@
 // The void pointer somehow identifies the PCI or MMIO device
 // returns true for OK
 bool VInit(RegEntryID *dev);
+bool VFinal(RegEntryID *dev);
 
 // Sets these globals
 extern void *VConfig;
