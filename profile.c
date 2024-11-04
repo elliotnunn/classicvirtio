@@ -17,6 +17,7 @@ and has an easy output channel (a file).
 #include "printf.h"
 
 #include "profile.h"
+#include "panic.h"
 
 void __cyg_profile_func_enter(void *this_fn, void *call_site);
 void __cyg_profile_func_exit(void *this_fn, void *call_site);
@@ -44,7 +45,7 @@ void InitProfile(uint32_t fid) {
 	Write9(outfid, header, 0, sizeof header - 1, NULL);
 	outseek = sizeof header - 1;
 	makeFuncTable();
-	VInstall(&timer);
+	VInstall((void *) &timer);
 }
 
 // thanks to -finstrument-functions
