@@ -73,6 +73,7 @@ void CatalogInit(struct Qid9 root) {
 	rootQID = root;
 }
 
+// The CNID arg must be a directory, unless an absolute path causes it to be ignored.
 // On success return a CNID. On failure, returns bdNamErr/dirNFErr/fnfErr.
 // These can be distinguished using IsErr().
 int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath, int32_t *retparent, char *retname) {
@@ -93,6 +94,9 @@ int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath, in
 		if (p==pend || *p==':') return fnfErr; // then text is absolutely mandatory
 		while (p<pend && *p!=':') p++;
 	} else { // relative path, convert the supplied CNID to a path using the database
+		if (!IsDir(cnid)) {
+			return fnfErr;
+		}
 		for (int32_t trail=cnid; trail!=2/*special "root" CNID*/;) {
 			if (nbyte+MAXNAME > sizeof scratch || nel == sizeof el/sizeof *el) {
 				return bdNamErr; // path too long
@@ -101,6 +105,9 @@ int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath, in
 			el[0] = scratch + nbyte;
 			nel++;
 			trail = CatalogGet(trail, scratch + nbyte);
+			if (IsErr(trail)) {
+				return fnfErr;
+			}
 			nbyte += strlen(scratch + nbyte) + 1;
 		}
 	}
@@ -144,6 +151,12 @@ int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath, in
 	struct Qid9 qids[sizeof el/sizeof *el];
 	uint16_t got = 0;
 	Walk9(ROOTFID, fid, nel, (const char *const *)el, &got, qids);
+
+	for (int i=0; i<got-1; i++) { // Not allowed to ".." from a file
+		if ((qids[i].type&0x80) == 0) {
+			return dirNFErr;
+		}
+	}
 
 	if (got == nel-1) {
 		return fnfErr;
