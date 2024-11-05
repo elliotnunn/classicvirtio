@@ -48,11 +48,51 @@ static struct SlotIntQElement slotInterruptBackstop = {
 	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptCompleteStub),
 };
 
-// returns true for OK
+bool VFinal(RegEntryID *id) {
+
+    UInt32 slotnum = id->contents[0];
+    UInt32 devindex = id->contents[1];
+
+//    pic = (void *)(0xf0000000 + 0x1000000*slotnum);
+//    device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
+//    VConfig = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1) + 0x100);
+
+    SynchronizeIO();
+    if (device->magicValue != 0x74726976) return false;
+    SynchronizeIO();
+    printf("Got magic number ");
+    if (device->version != 2) return false;
+    SynchronizeIO();
+    printf("Got correct version ");
+
+    // MUST read deviceID and status in that order
+    if (device->deviceID == 0) return false;
+    SynchronizeIO();
+    printf("Read devid ");
+
+    // 1. Reset the device.
+    SynchronizeIO();
+    device->status = 0;
+    SynchronizeIO();
+    while (device->status) {} // await 0
+
+//    SynchronizeIO();
+//    if (SIntRemove(&slotInterrupt, slotnum)) return false;
+//    if (SIntRemove(&slotInterruptBackstop, slotnum)) return false;
+//    SynchronizeIO();
+
+//    SynchronizeIO();
+//    pic->enable = 0;
+//    pic->disable = 0xffffffff;
+//    SynchronizeIO();
+
+    return true;
+}
 bool VInit(RegEntryID *id) {
+    printf("VInit\n");
 	// Work around a shortcoming in global initialisation
-	int slotnum = id->contents[0];
-	int devindex = id->contents[1];
+    UInt32 slotnum = id->contents[0];
+    UInt32 devindex = id->contents[1];
 
 	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
 	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
@@ -102,7 +142,7 @@ bool VInit(RegEntryID *id) {
 // Negotiate features
 bool VGetDevFeature(uint32_t number) {
 	SynchronizeIO();
-	device->deviceFeaturesSel = number / 32;
+	device->deviceFeaturesSel = number >> 5;
 	SynchronizeIO();
 	return (device->deviceFeatures >> (number % 32)) & 1;
 }
@@ -112,7 +152,7 @@ void VSetFeature(uint32_t number, bool val) {
 	uint32_t bits;
 
 	SynchronizeIO();
-	device->driverFeaturesSel = number / 32;
+	device->driverFeaturesSel = number >> 5;
 	SynchronizeIO();
 
 	bits = device->driverFeatures;

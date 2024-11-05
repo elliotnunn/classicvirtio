@@ -57,12 +57,17 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	case kReplaceCommand:
 		err = initialize(pb.initialInfo);
 		break;
+    case kKillIOCommand:
 	case kFinalizeCommand:
 	case kSupersededCommand:
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
 		err = controlErr;
+        if (pb.pb->cntrlParam.qLink->qType & 0x4081) {
+            printf("ctrl data: %d ctrl type: 0x%04X ", pb.pb->cntrlParam.qLink->qData[0], pb.pb->cntrlParam.qLink->qType);
+            /*err = */finalize(pb.finalInfo);
+        }
 		break;
 	case kStatusCommand:
 		err = statusErr;
@@ -81,28 +86,56 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = paramErr;
 		break;
 	}
+    printf("SpaceID: 0x%04X Err: %hd Code: 0x%04X CmdID: 0x%04X Kind: 0x%04X ", spaceID, (err & 0xFFFF), code, cmdID, kind);
 
 	// Return directly from every call
 	if (kind & kImmediateIOCommandKind) {
 		return err;
 	} else {
-		return IOCommandIsComplete(cmdID, err);
+		return IOCommandIsComplete(cmdID, (OSErr) err);
 	}
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
+    printf("Turning off Input(%d) on %X ", info->refNum, info->deviceEntry.contents[1]);
+
+    SynchronizeIO();
+    int nbuf = QFinal(info->refNum, 4096 / sizeof (struct event));
+    if (nbuf == 0) {
+        printf("Virtqueue layer failure\n");
+        VFail();
+        return openErr;
+    }
+    SynchronizeIO();
+    printf("Virtqueue layer finalized ");
+
+    CloseDriver(info->refNum);
+    SynchronizeIO();
+    printf("Driver closed ");
+
+    if (!VFinal(&info->deviceEntry)) {
+        printf("Transport layer failure\n");
+        VFail();
+        return closErr;
+    }
+    printf("Transport layer finalized ");
+
+//    FreePages(&ppage);
+    SynchronizeIO();
+    printf("Removed Successfully\n");
+
 	return noErr;
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
 	InitLog();
-	sprintf(LogPrefix, "Input(%d) ", info->refNum);
+	sprintf(LogPrefix, "Input(%d) on %X ", info->refNum, info->deviceEntry.contents[1]);
 
 	if (!VInit(&info->deviceEntry)) {
 		printf("Transport layer failure\n");
 		VFail();
 		return openErr;
-	};
+	}
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) {
@@ -161,7 +194,7 @@ static void handleEvent(struct event e) {
 	static long x, y;
 
 	static int knowmask, newbtn, oldbtn;
-
+//    printf("%hd %hd %d\n", e.code, e.type, e.value);
 	// Using a macOS Qemu host, each pixel of desired scroll returns both:
 	// type=EV_REL code=REL_WHEEL value=0/1
 	// type=EV_KEY code=BTN_GEAR_DOWN/BTN_GEAR_UP value=0
@@ -231,11 +264,12 @@ static void reQueue(int bufnum) {
 		false/*wait*/);
 }
 
-void DNotified(uint16_t q, volatile uint32_t *retlen) {
+void DNotified(uint16_t q, const volatile uint32_t *retlen) {
 	int bufnum = retlen - retlens;
 	handleEvent(lpage[bufnum]);
 	reQueue(bufnum);
 }
 
 void DConfigChange(void) {
+    printf("Config changed!\n");
 }

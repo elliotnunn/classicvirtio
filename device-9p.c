@@ -198,7 +198,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
-void DNotified(uint16_t q, volatile uint32_t *retlen) {
+void DNotified(uint16_t q, const volatile uint32_t *retlen) {
 }
 
 void DConfigChange(void) {
