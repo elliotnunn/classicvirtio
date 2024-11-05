@@ -66,7 +66,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = controlErr;
         if (pb.pb->cntrlParam.qLink->qType & 0x4081) {
             printf("ctrl data: %d ctrl type: 0x%04X ", pb.pb->cntrlParam.qLink->qData[0], pb.pb->cntrlParam.qLink->qType);
-            /*err = */finalize(pb.finalInfo);
+            err = finalize(pb.finalInfo);
         }
 		break;
 	case kStatusCommand:

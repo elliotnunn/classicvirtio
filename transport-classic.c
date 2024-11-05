@@ -75,16 +75,23 @@ bool VFinal(RegEntryID *id) {
     device->status = 0;
     SynchronizeIO();
     while (device->status) {} // await 0
+    printf("Device reset ");
 
-//    SynchronizeIO();
+    // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
+    device->status = 1;
+    SynchronizeIO();
+    printf("Condition acknowledged ");
+
 //    if (SIntRemove(&slotInterrupt, slotnum)) return false;
+//    printf("Slot removed ");
 //    if (SIntRemove(&slotInterruptBackstop, slotnum)) return false;
-//    SynchronizeIO();
+//    printf("Slot backstop removed ");
 
-//    SynchronizeIO();
-//    pic->enable = 0;
-//    pic->disable = 0xffffffff;
-//    SynchronizeIO();
+    SynchronizeIO();
+    pic->enable = 0;
+    pic->disable = 0xffffffff;
+    SynchronizeIO();
+    printf("Device disabled ");
 
     return true;
 }
