@@ -49,8 +49,9 @@ DriverDescription TheDriverDescription = {
 };
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
-                    IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
+        IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
     OSStatus err;
+    short ctrlType;
 
     switch (code) {
         case kInitializeCommand:
@@ -67,9 +68,10 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
             break;
         case kControlCommand:
             err = controlErr;
+            ctrlType = pb.pb->cntrlParam.qLink->qType;
             printf("ctrl data: %d ctrl type: 0x%04X\n", pb.pb->cntrlParam.qLink->qData[0],
-                   pb.pb->cntrlParam.qLink->qType);
-            if (pb.pb->cntrlParam.qLink->qType & 0x4081) {
+                   ctrlType);
+            if (!ctrlType || ctrlType & 0x4081) {
                 err = finalize(pb.finalInfo);
             }
             break;
@@ -270,10 +272,8 @@ static void reQueue(int bufnum) {
             false/*wait*/);
 }
 
-void DNotified(uint16_t q, const volatile uint32_t *retlen) {
+void DNotified(__attribute__((unused)) uint16_t q, const volatile uint32_t *retlen) {
     int bufnum = retlen - retlens;
-//    struct event *ev = &lpage[bufnum];
-//    printf("q: %hu bufnum: %d type: 0x%04X code: 0x%04X value: 0x%04X\n", q, bufnum, ev->type, ev->code, ev->value);
     handleEvent(lpage[bufnum]);
     reQueue(bufnum);
 }
