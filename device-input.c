@@ -25,9 +25,9 @@ struct event {
 	int32_t value;
 } __attribute((scalar_storage_order("little-endian")));
 
-typedef void (*GNEFilterType)(EventRecord *event, Boolean *result);
+__attribute__((unused)) typedef void (*GNEFilterType)(EventRecord *event, Boolean *result);
 
-short funnel(long commandCode, void *pb);
+__attribute__((unused)) short funnel(long commandCode, void *pb);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
@@ -42,7 +42,7 @@ DriverDescription TheDriverDescription = {
 	kInitialDriverDescriptor,
 	{"\x0cpci1af4,1052", {0x00, 0x10, 0x80, 0x00}}, // v0.1
 	{kDriverIsLoadedUponDiscovery |
-		kDriverIsOpenedUponLoad,
+		kDriverIsOpenedUponLoad | kDriverSupportDMSuspendAndResume,
 		"\x0c.VirtioInput"},
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
@@ -55,17 +55,20 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
+    case kResumeCommand:
 		err = initialize(pb.initialInfo);
 		break;
     case kKillIOCommand:
 	case kFinalizeCommand:
 	case kSupersededCommand:
+    case kPowerManagementCommand:
+    case kSuspendCommand:
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
 		err = controlErr;
+        printf("ctrl data: %d ctrl type: 0x%04X\n", pb.pb->cntrlParam.qLink->qData[0], pb.pb->cntrlParam.qLink->qType);
         if (pb.pb->cntrlParam.qLink->qType & 0x4081) {
-            printf("ctrl data: %d ctrl type: 0x%04X ", pb.pb->cntrlParam.qLink->qData[0], pb.pb->cntrlParam.qLink->qType);
             err = finalize(pb.finalInfo);
         }
 		break;
@@ -86,7 +89,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = paramErr;
 		break;
 	}
-    printf("SpaceID: 0x%04X Err: %hd Code: 0x%04X CmdID: 0x%04X Kind: 0x%04X ", spaceID, (err & 0xFFFF), code, cmdID, kind);
+    printf("SpaceID: 0x%04X Err: %hd Code: 0x%04X CmdID: 0x%04X Kind: 0x%04X\n",
+           spaceID, (err & 0xFFFF), code, cmdID, kind);
 
 	// Return directly from every call
 	if (kind & kImmediateIOCommandKind) {
@@ -97,8 +101,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
-    printf("Turning off Input(%d) on %X ", info->refNum, info->deviceEntry.contents[1]);
-
     SynchronizeIO();
     int nbuf = QFinal(info->refNum, 4096 / sizeof (struct event));
     if (nbuf == 0) {
@@ -107,18 +109,17 @@ static OSStatus finalize(DriverFinalInfo *info) {
         return openErr;
     }
     SynchronizeIO();
-    printf("Virtqueue layer finalized ");
+    printf("Virtqueue layer finalized\n");
 
     CloseDriver(info->refNum);
     SynchronizeIO();
-    printf("Driver closed ");
 
     if (!VFinal(&info->deviceEntry)) {
         printf("Transport layer failure\n");
         VFail();
         return closErr;
     }
-    printf("Transport layer finalized ");
+    printf("Transport layer finalized\n");
 
     FreePages(&ppage);
     SynchronizeIO();
@@ -129,7 +130,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 
 static OSStatus initialize(DriverInitInfo *info) {
 	InitLog();
-	sprintf(LogPrefix, "Input(%d) on %X ", info->refNum, info->deviceEntry.contents[1]);
+	sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
 	if (!VInit(&info->deviceEntry)) {
 		printf("Transport layer failure\n");
@@ -194,7 +195,7 @@ static void handleEvent(struct event e) {
 	static long x, y;
 
 	static int knowmask, newbtn, oldbtn;
-//    printf("%hd %hd %d\n", e.code, e.type, e.value);
+
 	// Using a macOS Qemu host, each pixel of desired scroll returns both:
 	// type=EV_REL code=REL_WHEEL value=0/1
 	// type=EV_KEY code=BTN_GEAR_DOWN/BTN_GEAR_UP value=0
@@ -266,10 +267,11 @@ static void reQueue(int bufnum) {
 
 void DNotified(uint16_t q, const volatile uint32_t *retlen) {
 	int bufnum = retlen - retlens;
+//    struct event *ev = &lpage[bufnum];
+//    printf("q: %hu bufnum: %d type: 0x%04X code: 0x%04X value: 0x%04X\n", q, bufnum, ev->type, ev->code, ev->value);
 	handleEvent(lpage[bufnum]);
 	reQueue(bufnum);
 }
 
 void DConfigChange(void) {
-    printf("Config changed!\n");
 }

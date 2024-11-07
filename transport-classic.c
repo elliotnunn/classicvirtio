@@ -49,52 +49,34 @@ static struct SlotIntQElement slotInterruptBackstop = {
 };
 
 bool VFinal(RegEntryID *id) {
-
+    printf("VFinal\n");
     UInt32 slotnum = id->contents[0];
     UInt32 devindex = id->contents[1];
 
-//    pic = (void *)(0xf0000000 + 0x1000000*slotnum);
-//    device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
-//    VConfig = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1) + 0x100);
-
-    SynchronizeIO();
     if (device->magicValue != 0x74726976) return false;
     SynchronizeIO();
-    printf("Got magic number ");
+
     if (device->version != 2) return false;
     SynchronizeIO();
-    printf("Got correct version ");
 
-    // MUST read deviceID and status in that order
-    if (device->deviceID == 0) return false;
+    pic->enable = 0;
     SynchronizeIO();
-    printf("Read devid ");
+    pic->disable = 0xffffffff;
+    SynchronizeIO();
+    printf("Device disabled\n");
 
-    // 1. Reset the device.
+    printf("Slot removed: 0x%04X\n", SIntRemove(&slotInterrupt, slotnum));
+    printf("Slot backstop removed: 0x%04X\n", SIntRemove(&slotInterruptBackstop, slotnum));
     SynchronizeIO();
+
     device->status = 0;
     SynchronizeIO();
     while (device->status) {} // await 0
-    printf("Device reset ");
-//    device->status = 0x80;
-//    SynchronizeIO();
-
-//    // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-//    device->status = 1;
-//    SynchronizeIO();
-//    printf("Condition acknowledged ");
-
-//    printf("Slot removed: %X ", SIntRemove(&slotInterrupt, slotnum));
-//    printf("Slot backstop removed: %X ", SIntRemove(&slotInterruptBackstop, slotnum));
-//    SynchronizeIO();
-
-//    pic->enable = 0xffffffff;
-//    pic->disable = 0xffffffff;
-//    SynchronizeIO();
-//    printf("Device disabled ");
 
     return true;
 }
+
+// returns true for OK
 bool VInit(RegEntryID *id) {
     printf("VInit\n");
 	// Work around a shortcoming in global initialisation
