@@ -765,6 +765,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, con
 	memset((char *)pb + 30, 0, 80 - 30);
 
 	// Determine whether the file is open
+	pb->ioFRefNum = 0;
 	struct MyFCB *fcb = UnivFirst(cnid, true);
 	if (fcb != NULL) {
 		pb->ioFlAttrib |= kioFlAttribResOpenMask | kioFlAttribFileOpenMask;
