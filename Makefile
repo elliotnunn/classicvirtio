@@ -88,12 +88,13 @@ build/ndrv/ndrvloader: ndrvloader.s ndrvloader.c build/ndrv/allndrv
 build/ndrv/allndrv: $(patsubst %,build/ndrv/ndrv-%,$(DEVICES_NDRV))
 	cat $^ >$@
 
-build/ndrv/%.o: %.c
-	powerpc-apple-macos-gcc $(CDEFS) -c -Os -ffunction-sections -fdata-sections -o $@ $<
-
-NDRVSTATICLIBS = $(shell for x in libStdCLib.a libDriverServicesLib.a libNameRegistryLib.a libPCILib.a libVideoServicesLib.a libInterfaceLib.a libControlsLib.a libgcc.a libc.a; do powerpc-apple-macos-gcc -print-file-name=$$x; done)
-build/ndrv/ndrv-%.so: ndrv.lds build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
-	powerpc-apple-macos-ld --gc-sections --gc-keep-exported -bE:ndrv.exp -o $@ --script $^ $(NDRVSTATICLIBS)
+build/ndrv/ndrv-%.so: device-%.c $(SUPPORT_NDRV) ndrv.exp ndrv.lds
+	powerpc-apple-macos-gcc -o $@ \
+		$(CDEFS) \
+		-Os -ffunction-sections -fdata-sections \
+		-T ndrv.lds -Wl,-bE:ndrv.exp -Wl,--gc-sections -Wl,--gc-keep-exported \
+		$< $(SUPPORT_NDRV) \
+		-lStdCLib -lDriverServicesLib -lNameRegistryLib -lPCILib -lVideoServicesLib -lInterfaceLib -lControlsLib
 
 build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 	MakePEF -o $@ $^
