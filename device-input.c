@@ -52,24 +52,23 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
         IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
     OSStatus err;
     short ctrlType;
+    QElemPtr qLink;
+    InitLog();
 
     switch (code) {
         case kInitializeCommand:
         case kReplaceCommand:
-        case kResumeCommand:
             err = initialize(pb.initialInfo);
             break;
-        case kKillIOCommand:
         case kFinalizeCommand:
         case kSupersededCommand:
-        case kPowerManagementCommand:
-        case kSuspendCommand:
             err = finalize(pb.finalInfo);
             break;
         case kControlCommand:
             err = controlErr;
-            ctrlType = pb.pb->cntrlParam.qLink->qType;
-            printf("ctrl data: %d ctrl type: 0x%04X\n", pb.pb->cntrlParam.qLink->qData[0],
+            qLink = pb.pb->cntrlParam.qLink;
+            ctrlType = qLink->qType;
+            printf("ctrl data: %d ctrl type: 0x%04X\n", qLink->qData[0],
                    ctrlType);
             if (!ctrlType || ctrlType & 0x4081) {
                 err = finalize(pb.finalInfo);
@@ -132,7 +131,6 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-    InitLog();
     sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
     if (!VInit(&info->deviceEntry)) {
