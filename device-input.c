@@ -53,7 +53,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
     OSStatus err;
     short ctrlType;
     QElemPtr qLink;
-    InitLog();
 
     switch (code) {
         case kInitializeCommand:
@@ -103,6 +102,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
+    InitLog();
+    sprintf(LogPrefix, "Input(%d) ", info->refNum);
+
     SynchronizeIO();
     int nbuf = QFinal(info->refNum, 4096 / sizeof(struct event));
     if (nbuf == 0) {
@@ -131,6 +133,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
+    InitLog();
     sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
     if (!VInit(&info->deviceEntry)) {
