@@ -104,8 +104,7 @@ bool VInit(RegEntryID *id) {
 	while (device->status) {} // wait till 0
 
 	// 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-	device->status = 1;
-	SynchronizeIO();
+    VAcknowledge();
 
 	// 3. Set the DRIVER status bit: the guest OS knows how to drive the device.
 	device->status = 1 | 2;
@@ -194,6 +193,12 @@ void VNotify(uint16_t queue) {
 	SynchronizeIO();
 	device->queueNotify = queue;
 	SynchronizeIO();
+}
+
+void VAcknowledge() {
+    SynchronizeIO();
+    device->status = 1;
+    SynchronizeIO();
 }
 
 static long interrupt(void) {

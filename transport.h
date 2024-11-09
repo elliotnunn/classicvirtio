@@ -25,6 +25,7 @@ void VSetFeature(uint32_t number, bool val);
 bool VFeaturesOK(void);
 void VDriverOK(void);
 void VFail(void);
+void VAcknowledge(void);
 
 // Tell the device where to find the three (split) virtqueue rings
 uint16_t VQueueMaxSize(uint16_t q);

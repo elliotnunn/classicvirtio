@@ -4,20 +4,15 @@
 #include <Devices.h>
 #include <DriverServices.h>
 #include <Events.h>
-#include <MixedMode.h>
-#include <Types.h>
 
 #include "allocator.h"
 #include "callout68k.h"
 #include "printf.h"
-#include "panic.h"
 #include "transport.h"
 #include "scrollwheel.h"
 #include "virtqueue.h"
 
 #include "device.h"
-
-#include <string.h>
 
 struct event {
     int16_t type;
@@ -33,9 +28,10 @@ static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
 static void reQueue(int bufnum);
 
+enum { MAX_SIZE = 4096 / sizeof(struct event) };
 static struct event *lpage;
 static uint32_t ppage;
-static volatile uint32_t retlens[4096 / sizeof(struct event)];
+static volatile uint32_t retlens[MAX_SIZE];
 
 DriverDescription TheDriverDescription = {
         kTheDescriptionSignature,
@@ -48,14 +44,13 @@ DriverDescription TheDriverDescription = {
          {{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
-        IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
+OSStatus DoDriverIO(__attribute__((unused)) AddressSpaceID spaceID,
+                    IOCommandID cmdID, IOCommandContents pb, IOCommandCode code,
+                    IOCommandKind kind) {
     OSStatus err;
-    short ctrlType;
-    QElemPtr qLink;
-    CntrlParam ctrlParam;
+    const short csCode = pb.pb->cntrlParam.csCode;
 
-    switch (code) {
+    switch (code & 0xFF) {
         case kInitializeCommand:
         case kReplaceCommand:
             err = initialize(pb.initialInfo);
@@ -65,15 +60,22 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
             err = finalize(pb.finalInfo);
             break;
         case kControlCommand:
-            err = controlErr;
-            ctrlParam = pb.pb->cntrlParam;
-            qLink = ctrlParam.qLink;
-            ctrlType = qLink->qType;
-            printf("qlink data: %d qlink type: 0x%04X cs code: 0x%04X cs param:"
-                   " 0x%04X\n", qLink->qData[0], ctrlType, ctrlParam.csCode,
-                   ctrlParam.csParam);
-            if (!ctrlType || ctrlType & 0x4081) {
-                err = finalize(pb.finalInfo);
+            printf("Control: csCode: 0x%04X\n", csCode);
+
+            switch (csCode) {
+                case goodbye:
+                case killCode:
+                    err = finalize(pb.finalInfo);
+                    break;
+                    // TODO not sure about this yet,
+                    //  but might be promising re: A/UX - peads
+//                case 2:
+//                    VAcknowledge();
+//                    err = noErr;
+//                    break;
+                default:
+                    err = controlErr;
+                    break;
             }
             break;
         case kStatusCommand:
@@ -93,8 +95,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
             err = paramErr;
             break;
     }
-    printf("SpaceID: 0x%04X Err: %hd Code: 0x%04X CmdID: 0x%04X Kind: 0x%04X\n",
-           spaceID, (err & 0xFFFF), code, cmdID, kind);
+    printf("csCode: 0x%04X Err: %hd Code: 0x%04X CmdID: 0x%04X Kind: 0x%04X\n",
+           csCode, (err & 0xFFFF), code, cmdID, kind);
 
     // Return directly from every call
     if (kind & kImmediateIOCommandKind) {
@@ -109,7 +111,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
     sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
     SynchronizeIO();
-    int nbuf = QFinal(info->refNum, 4096 / sizeof(struct event));
+    int nbuf = QFinal(info->refNum, MAX_SIZE);
     if (nbuf == 0) {
         printf("Virtqueue layer failure\n");
         VFail();
@@ -118,6 +120,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
     SynchronizeIO();
     printf("Virtqueue layer finalized\n");
 
+    SynchronizeIO();
     CloseDriver(info->refNum);
     SynchronizeIO();
 
@@ -161,7 +164,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
     VDriverOK();
 
-    int nbuf = QInit(0, 4096 / sizeof(struct event));
+    int nbuf = QInit(0, MAX_SIZE);
     if (nbuf == 0) {
         printf("Virtqueue layer failure\n");
         VFail();
