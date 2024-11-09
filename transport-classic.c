@@ -51,7 +51,6 @@ static struct SlotIntQElement slotInterruptBackstop = {
 bool VFinal(RegEntryID *id) {
     printf("VFinal\n");
     UInt32 slotnum = id->contents[0];
-    UInt32 devindex = id->contents[1];
 
     if (device->magicValue != 0x74726976) return false;
     SynchronizeIO();
