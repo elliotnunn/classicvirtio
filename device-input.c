@@ -42,7 +42,7 @@ DriverDescription TheDriverDescription = {
         kInitialDriverDescriptor,
         {"\x0cpci1af4,1052", {0x00, 0x10, 0x80, 0x00}}, // v0.1
         {kDriverIsLoadedUponDiscovery |
-         kDriverIsOpenedUponLoad | kDriverSupportDMSuspendAndResume,
+         kDriverIsOpenedUponLoad,
          "\x0c.VirtioInput"},
         {1, // nServices
          {{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
