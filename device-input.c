@@ -50,7 +50,7 @@ OSStatus DoDriverIO(__attribute__((unused)) AddressSpaceID spaceID,
     OSStatus err;
     const short csCode = pb.pb->cntrlParam.csCode;
 
-    switch (code & 0xFF) {
+    switch (code) {
         case kInitializeCommand:
         case kReplaceCommand:
             err = initialize(pb.initialInfo);
