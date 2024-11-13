@@ -67,11 +67,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
                 case killCode:
                     err = finalize(pb.finalInfo);
                     break;
-//                case 2:
-//                    TODO not sure about this yet,
-//                     but might be promising re: (re-)initializing
-//                     driver for A/UX --peads
-//                    break;
                 default:
                     err = controlErr;
                     break;

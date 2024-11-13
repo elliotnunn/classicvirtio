@@ -51,25 +51,13 @@ static struct SlotIntQElement slotInterruptBackstop = {
 bool VFinal(RegEntryID *id) {
     UInt32 slotnum = id->contents[0];
 
-    if (device->magicValue != 0x74726976) return false;
+    device->status = 0;
     SynchronizeIO();
-
-    if (device->version != 2) return false;
-    SynchronizeIO();
-
-    pic->enable = 0;
-    SynchronizeIO();
-    pic->disable = 0xffffffff;
-    SynchronizeIO();
-    printf("Device disabled\n");
+    while (device->status) {} // await 0
 
     printf("Slot removed: 0x%04X\n", SIntRemove(&slotInterrupt, slotnum));
     printf("Slot backstop removed: 0x%04X\n", SIntRemove(&slotInterruptBackstop, slotnum));
     SynchronizeIO();
-
-    device->status = 0;
-    SynchronizeIO();
-    while (device->status) {} // await 0
 
     return true;
 }
