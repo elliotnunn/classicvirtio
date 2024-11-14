@@ -125,8 +125,6 @@ static OSStatus finalize(DriverFinalInfo *info) {
     printf("Transport layer finalized\n");
 
     SynchronizeIO();
-    FreePages(&ppage);
-    SynchronizeIO();
     printf("Removed Successfully\n");
 
     return noErr;
