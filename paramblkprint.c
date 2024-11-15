@@ -326,6 +326,7 @@ static const char *controlname(short code) {
 		case 51: return "kGetADrive";
 		case 52: return "kProhibitMounting";
 		case 60: return "kMountVolume";
+		case 65: return "accRun";
 		case 70: return "kdgLowPowerMode";
 		default: return "(unknown)";
 	}

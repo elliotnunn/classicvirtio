@@ -70,8 +70,6 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installDrive(void);
 static void installExtFS(void);
-static void ensureFutureMount(void);
-static void lateBootHook(void);
 static void getBootBlocks(void);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
@@ -296,8 +294,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	printf("Fork format: %s\n", MF.Name);
 	if (MF.Init()) return memFullErr;
 
-	installDrive();
-
 	int32_t systemFolder = CatalogWalk(FID1, 2 /*cnid*/, "\pSystem Folder", NULL, NULL);
 	vcb.vcbFndrInfo[0] = IsErr(systemFolder) ? 0 : systemFolder;
 	printf("System Folder: %s\n", IsErr(systemFolder) ? "absent" : "present");
@@ -307,24 +303,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 		MF.Del(ROOTFID, "Shutdown Check", false);
 	}
 
-	printf("File Manager: %s\n", GetVCBQHdr()->qHead != (void *)-1 ? "present" : "absent");
+	// Connect our driver to the File Manager
+	installDrive();
+	installExtFS();
 
-	if (GetVCBQHdr()->qHead != (void *)-1) {
-		installExtFS();
-		ensureFutureMount();
-	} else {
-		Patch68k(
-			_InitFS,
-			"4eb9 %o "   // jsr     originalInitFS
-			"48e7 e0c0 " // movem.l d0-d2/a0-a1,-(sp)
-			"4eb9 %l "   // jsr     installExtFS
-			"4eb9 %l "   // jsr     ensureFutureMount
-			"4cdf 0307", // movem.l (sp)+,d0-d2/a0-a1
-			             // fallthru to uninstall code
-			CALLIN68K_C_ARG0_FUNCDEF(installExtFS),
-			CALLIN68K_C_ARG0_FUNCDEF(ensureFutureMount)
-		);
-	}
+	// Switch on accRun... we post diskEvt... Finder calls MountVol
+	(*GetDCtlEntry(drvrRefNum))->dCtlFlags |= dNeedTimeMask;
 
 	return noErr;
 }
@@ -337,7 +321,7 @@ static void installDrive(void) {
 	printf("Drive number: %d\n", dqe.dqe.dQDrive);
 }
 
-// Requires _InitFS to have been called
+// Through patch magic, does not require _InitFS to have been called
 static void installExtFS(void) {
 	// Difficult to decide whether another device driver already installed the patch.
 	// (A Gestalt selector was used but System 7 likes to swallow these at startup.)
@@ -421,40 +405,16 @@ static void installExtFS(void) {
 		offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
 		FSID
 	);
-}
 
-// Conventionally, posting a diskEvt some time after InitEvents was thought
-// to ensure an eventual MountVol. But OS 9 seems to lose events posted early
-// in the startup process, so we just call MountVol when startup is complete.
-// (TN1189 suggests repeatedly posting diskEvt at accRun time, but this would
-// need an NDRV compatible accRun substitute. Our way is simpler.)
-static void ensureFutureMount(void) {
-	PostEvent(diskEvt, dqe.dqe.dQDrive);
-	printf("Posted (diskEvt,%d) and will call MountVol after startup:\n", dqe.dqe.dQDrive);
-
-	// Process Manager calls NewGestalt('os  ') at the very end of startup
-	Patch68k(
-		_Gestalt,
-		"0c80 6f732020" //      cmp.l   #'os  ',d0
-		"661c"          //      bne.s   old
-		"0801 0009"     //      btst    #9,d1
-		"6716"          //      beq.s   old
-		"0801 000a"     //      btst    #10,d1
-		"6610"          //      bne.s   old
-		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
-		"4eb9 %l"       //      jsr     lateBootHook
-		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
-		"6106"          //      bsr.s   uninstall
-		"4ef9 %o",      // old: jmp     originalGestalt
-		                // uninstall: (fallthrough code)
-		CALLIN68K_C_ARG0_FUNCDEF(lateBootHook)
-	);
-}
-
-static void lateBootHook(void) {
-	if (dqe.dqe.qType == 0) {
-		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
-		PBMountVol((void *)&pb);
+	if ((long)GetVCBQHdr()->qHead == -1) {
+		printf("FileMgr not up so patching InitFS to protect ToExtFS: ");
+		Patch68k(
+			_InitFS,
+			"2f38 03f2 "    // move.l  ToExtFS,-(sp)
+			"4eb9 %o "      // jsr     originalInitFS
+			"21df 03f2"     // move.l (sp)+,ToExtFS
+							// fallthrough to patch uninstaller
+		);
 	}
 }
 
@@ -554,6 +514,9 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	// Hack to show this volume in the Startup Disk cdev
 	dqe.dqe.dQFSID = 0;
+
+	// No more diskEvt spam
+	(*GetDCtlEntry(drvrRefNum))->dCtlFlags &= ~dNeedTimeMask;
 
 	return noErr;
 }
@@ -1648,6 +1611,14 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	}
 }
 
+// Conventionally, posting diskEvt was thought to ensure an eventual MountVol.
+// But these events can be lost for various reasons so TN1189
+// advises repeatedly posting diskEvt at accRun time.
+static OSErr cAccRun(struct CntrlParam *pb) {
+	PostEvent(diskEvt, dqe.dqe.dQDrive);
+	return noErr;
+}
+
 static OSErr cIcon(struct CntrlParam *pb) {
 	struct about {
 		uint32_t icon[64];
@@ -1758,6 +1729,7 @@ static OSErr controlStatusCall(struct CntrlParam *pb) {
 
 static OSErr controlStatusDispatch(long selector, void *pb) {
 	switch (selector) {
+	case accRun: return cAccRun(pb);
 	case kDriveIcon: return cIcon(pb);
 	case kMediaIcon: return cIcon(pb);
 	case kDriveInfo: return cDriveInfo(pb);
