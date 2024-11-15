@@ -10,7 +10,6 @@
 #include <Errors.h>
 #include <Files.h>
 #include <FSM.h>
-#include <Gestalt.h>
 #include <LowMem.h>
 #include <Memory.h>
 #include <MixedMode.h>
@@ -340,16 +339,23 @@ static void installDrive(void) {
 
 // Requires _InitFS to have been called
 static void installExtFS(void) {
-	// A single ToExtFS patch can be shared between multiple 9P device drivers
-	// Use a Gestalt selector to declare its presence
-	long selector = FSID<<16 | 'h'<<8 | 'k';
-	void *patchaddr;
-	if (Gestalt(selector, (long *)&patchaddr) != noErr) patchaddr = NULL;
+	// Difficult to decide whether another device driver already installed the patch.
+	// (A Gestalt selector was used but System 7 likes to swallow these at startup.)
+	// First, does ToExtFS obviously point to our patch?
+	if (*(char **)0x3f2 != (char *)-1) {
+		if (!memcmp(*(char **)0x3f2, "\x60\x04\x39\x50\x46\x53", 6)) {
+			printf("ToExtFS already patched\n");
+			return;
+		}
+	}
 
-	printf("Hooking ToExtFS (Gestalt '%.4s'): ", &selector);
-	if (patchaddr) {
-		printf("already installed at %p\n", patchaddr);
-		return;
+	// Maybe the hook is buried... can MountVol get through to it?
+	// Important: requires drive queue element to be installed already
+	if (GetVCBQHdr()->qHead != (QElemPtr)-1) { // FileMgr works
+		if (PBMountVol((void *)&(struct IOParam){.ioVRefNum=dqe.dqe.dQDrive, .ioReqCount=0x20121993}) == nsDrvErr) {
+			printf("ToExtFS already patched (and another on top)\n");
+			return;
+		}
 	}
 
 	// External filesystems need a big stack, and they can't
@@ -359,10 +365,12 @@ static void installExtFS(void) {
 	if (stack == NULL) panic("failed extfs stack allocation");
 
 	// All instances of this driver share the one 68k hook (and one stack)
-	patchaddr = Patch68k(
+	printf("ToExtFS patch: ");
+	Patch68k(
 		0x3f2, // ToExtFS:
 		// Fast path is when ReqstVol points to a 9p device (inspect VCB)
 		// (ReqstVol can be -1 on a Quadra in early boot)
+		"6004 39504653 "  // bra.s *+6; "9PFS"
 		"2438 03ee "      // move.l  ReqstVol,d2
 		"6f %MOUNTCK "    // ble.s   MOUNTCK
 		"2242 "           // move.l  d2,a1
@@ -412,19 +420,6 @@ static void installExtFS(void) {
 		stack + STACKSIZE - 100,
 		offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
 		FSID
-	);
-
-	// Use this single code path instead of SetGestaltValue
-	printf("Setting Gestalt '%.4s' to %p: ", &selector, patchaddr);
-	Patch68k(
-		selector,
-		"205f "    // move.   (sp)+,a0 ; a0 = return address
-		"225f "    // move.   (sp)+,a1 ; a1 = address to return result
-		"584f "    // addq    #4,sp    ; selector, discard
-		"4257 "    // clr.w   (sp)     ; return value = noErr
-		"22bc %l " // move.l  #value,(a1)
-		"4ed0",    // jmp     (a0)
-		patchaddr
 	);
 }
 
@@ -532,6 +527,9 @@ done:
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
+	if (pb->ioReqCount == 0x20121993) {
+		return nsDrvErr; // hack for installExtFS to probe the ToExtFS patch
+	}
 	if (dqe.dqe.qType) return volOnLinErr;
 
 	vparms.vMLocalHand = NewHandleSysClear(2);
