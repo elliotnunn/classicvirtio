@@ -96,6 +96,12 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 		case 'P': // Driver Gestalt name (special Status call)
 			SPRINTF("'%.4s' %s", pb+offset, drvrgestaltname(*(long *)(pb+offset)));
 			break;
+		case 'Q': // ioFDirIndex for GetFileInfo
+		case 'R': // ioFDirIndex for GetCatInfo
+			int16_t idx = *(unsigned short *)(pb+offset);
+			if (prog[-1]=='Q' && idx<0) idx = 0;
+			SPRINTF("%d %s", idx, idx>0 ? "dirID+index" : idx==0 ? "dirID+path" : "dirID only");
+			break;
 		case 's': // string
 			{
 				unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
@@ -393,6 +399,7 @@ static const char *drvrconfname(long code) {
 
 // No need to worry about the "usual" fields like ioTrap
 static const char *minilang(const char *pb, unsigned short selector, short status) {
+	int16_t ioFDirIndex = *(int16_t *)(pb+28);
 	switch (selector & 0xf0ff) {
 	case 0xa000: // Open
 		if (status > 0) {
@@ -601,13 +608,13 @@ static const char *minilang(const char *pb, unsigned short selector, short statu
 	case 0xa00c: // GetFileInfo
 		if (status > 0) {
 			// parameters
-			return "ioNamePtr18s "
+			return "ioNamePtr18s " // argument in once mode
 			       "ioVRefNum22w "
-			       "ioFDirIndex28w "
-			       "ioDirID48l";
+			       "ioFDirIndex28Q "
+			       "ioDirID48l" + 13*(ioFDirIndex>0);
 		} else if (status == 0) {
 			// return on noErr
-			return "ioNamePtr18s "
+			return "ioNamePtr18s " // return in the other mode
 			       "ioFRefNum24w "
 			       "ioFlAttrib30b "
 			       "ioFlFndrInfo32F "
@@ -619,7 +626,7 @@ static const char *minilang(const char *pb, unsigned short selector, short statu
 			       "ioFlRLgLen64l "
 			       "ioFlRPyLen68l "
 			       "ioFlCrDat72l "
-			       "ioFlMdDat76l";
+			       "ioFlMdDat76l" + 13*(ioFDirIndex<=0);
 		} else {
 			// return on failure
 			return "";
@@ -924,14 +931,14 @@ static const char *minilang(const char *pb, unsigned short selector, short statu
 	case 0x09: // GetCatInfo
 		if (status > 0) {
 			// parameters
-			return "ioNamePtr18s "
+			return "ioNamePtr18s " // argument in one mode
 			       "ioVRefNum22w "
-			       "ioFDirIndex28w "
-			       "ioDirID48l";
+			       "ioFDirIndex28R "
+			       "ioDirID48l" + 13*(ioFDirIndex!=0);
 		} else if (status == 0) {
 			// return on noErr
 			if (pb[30] & 0x10) { // directory
-				return "ioNamePtr18s "
+				return "ioNamePtr18s " // return in the other 2 modes
 				       "ioFRefNum24w "
 				       "ioFlAttrib30b "
 				       "ioACUser31b "
@@ -942,9 +949,9 @@ static const char *minilang(const char *pb, unsigned short selector, short statu
 				       "ioDrMdDat76l "
 				       "ioDrBkDat80l "
 				       "ioDrFndrInfo84F "
-				       "ioDrParID100l";
+				       "ioDrParID100l" + 13*(ioFDirIndex==0);
 			} else { // file
-				return "ioNamePtr18s "
+				return "ioNamePtr18s " // return in the other 2 modes
 				       "ioFRefNum24w "
 				       "ioFlAttrib30b "
 				       "ioACUser31b "
@@ -961,7 +968,7 @@ static const char *minilang(const char *pb, unsigned short selector, short statu
 				       "ioFlBkDat80l "
 				       "ioFlXFndrInfo84F "
 				       "ioFlParID100l "
-				       "ioFlClpSiz104l";
+				       "ioFlClpSiz104l" + 13*(ioFDirIndex==0);
 			}
 		} else {
 			// return on failure

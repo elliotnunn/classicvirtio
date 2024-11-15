@@ -39,13 +39,13 @@ enum {
 	REZFID, // Rez code in a public place
 	FINFOFID,
 	TMPFID,
-	MAINFID,
+	PARENTFID,
 	DIRTYFLAG = 1,
 };
 
-static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
-static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat);
-static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name);
+static void statResourceFork(int32_t cnid, uint32_t parentfid, const char *name, struct Stat9 *stat);
+static void pullResourceFork(int32_t cnid, uint32_t parentfid, const char *name, struct Stat9 *stat);
+static void pushResourceFork(int32_t cnid, uint32_t parentfid, const char *name);
 static int flagsToText(char *buf, const char finfo[16], const char fxinfo[16]);
 static void textToFlags(char finfo[16], char fxinfo[16], const char * text, int len);
 static uint32_t fidof(struct MyFCB *fcb);
@@ -84,7 +84,8 @@ static int open3(struct MyFCB *fcb, int32_t cnid, uint32_t fid, const char *name
 	int err = 0;
 	if (fcb->fcbFlags&fcbResourceMask) {
 		struct Stat9 junk;
-		statResourceFork(cnid, fid, name, &junk);
+		WalkPath9(fid, PARENTFID, "..");
+		statResourceFork(cnid, PARENTFID, name, &junk);
 
 		char path[9];
 		sprintf(path, "%08x", cnid);
@@ -110,10 +111,14 @@ static int close3(struct MyFCB *fcb) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
 		char name[MAXNAME];
-		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, (const unsigned char *)"", NULL, name))) {
-			panic("CatalogWalk failed!");
+		int32_t parent = CatalogGet(fcb->fcbFlNm, name);
+		if (IsErr(parent)) {
+			panic("file was deleted while open");
 		}
-		pushResourceFork(fcb->fcbFlNm, MAINFID, name);
+		if (IsErr(CatalogWalk(PARENTFID, parent, NULL, NULL, NULL))) {
+			panic("file went missing while open");
+		}
+		pushResourceFork(fcb->fcbFlNm, PARENTFID, name);
 	}
 
 	return Clunk9(fidof(fcb));
@@ -152,10 +157,14 @@ static int seteof3(struct MyFCB *fcb, uint64_t len) {
 			i->mfFlags &= ~DIRTYFLAG; // clear it
 		}
 		char name[MAXNAME];
-		if (IsErr(CatalogWalk(MAINFID, fcb->fcbFlNm, (const unsigned char *)"", NULL, name))) {
-			panic("CatalogWalk failed!");
+		int32_t parent = CatalogGet(fcb->fcbFlNm, name);
+		if (IsErr(parent)) {
+			panic("file was deleted while open");
 		}
-		pushResourceFork(fcb->fcbFlNm, MAINFID, name);
+		if (IsErr(CatalogWalk(PARENTFID, parent, NULL, NULL, NULL))) {
+			panic("file went missing while open");
+		}
+		pushResourceFork(fcb->fcbFlNm, PARENTFID, name);
 	}
 	return 0;
 }
@@ -178,10 +187,14 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 		attr->unixtime = dstat.mtime_sec;
 	}
 
+	if ((fields & MF_RSIZE) || (fields & MF_TIME) || (fields & MF_FINFO)) {
+		WalkPath9(fid, PARENTFID, "..");
+	}
+
 	// Very costly: ensure the resource fork has been Rezzed into the cache
 	if ((fields & MF_RSIZE) || (fields & MF_TIME)) {
 		struct Stat9 rstat = {};
-		statResourceFork(cnid, fid, name, &rstat);
+		statResourceFork(cnid, PARENTFID, name, &rstat);
 
 		attr->rsize = rstat.size;
 		if (attr->unixtime < rstat.mtime_sec) attr->unixtime = rstat.mtime_sec;
@@ -189,7 +202,7 @@ int fgetattr3(int32_t cnid, uint32_t fid, const char *name, unsigned fields, str
 
 	// Costly: read the Finder info
 	if (fields & MF_FINFO) {
-		char ipath[MAXNAME];
+		char ipath[MAXNAME+12];
 		sprintf(ipath, "../%s.idump", name);
 
 		if (!WalkPath9(fid, FINFOFID, ipath)
@@ -313,10 +326,10 @@ struct MFImpl MF3 = {
 };
 
 // This function is idempotent. It brings the cached resource fork up to date and stats it.
-static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
+static void statResourceFork(int32_t cnid, uint32_t parentfid, const char *name, struct Stat9 *stat) {
 	int err;
 
-	// printf("statResourceFork cnid=%08x mainfid=%d name=%s\n", cnid, mainfid, name);
+	// printf("statResourceFork cnid=%08x parentfid=%d name=%s\n", cnid, parentfid, name);
 
 	// Delightfully quick case
 	struct MyFCB *alreadyopen = UnivFirst(cnid, true);
@@ -329,11 +342,11 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+12];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
-	sprintf(sidecarname, "../%s.rdump", name);
+	sprintf(sidecarname, "%s.rdump", name);
 
 	if (WalkPath9(DIRFID, CLEANRECFID, rsname)) {
 		printf("(because no -rezstat file) ");
-		pullResourceFork(cnid, mainfid, name, stat);
+		pullResourceFork(cnid, parentfid, name, stat);
 		return;
 	}
 
@@ -345,18 +358,18 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	Read9(CLEANRECFID, &expect, 0, sizeof expect, &statfilesize);
 	Clunk9(CLEANRECFID);
 
-	bool nosidecar = WalkPath9(mainfid, REZFID, sidecarname) != 0;
+	bool nosidecar = WalkPath9(parentfid, REZFID, sidecarname) != 0;
 	if (statfilesize==0 && nosidecar) {
 		printf("resource fork cache agreed empty\n");
 		memset(stat, 0, sizeof *stat); // agree, empty resource fork
 		return;
 	} else if (statfilesize==0) {
 		printf("(because rdump newly created) ");
-		pullResourceFork(cnid, mainfid, name, stat);
+		pullResourceFork(cnid, parentfid, name, stat);
 		return;
 	} else if (nosidecar) {
 		printf("(because sidecar newly deleted) ");
-		pullResourceFork(cnid, mainfid, name, stat);
+		pullResourceFork(cnid, parentfid, name, stat);
 		return;
 	}
 
@@ -364,7 +377,7 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	Getattr9(REZFID, STAT_SIZE|STAT_MTIME, &scstat);
 	if (scstat.size!=expect.size || scstat.mtime_sec!=expect.mtime_sec || scstat.mtime_nsec!=expect.mtime_nsec) {
 		printf("(because of stat mismatch) ");
-		pullResourceFork(cnid, mainfid, name, stat);
+		pullResourceFork(cnid, parentfid, name, stat);
 		return;
 	}
 
@@ -377,14 +390,14 @@ static void statResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	stat->mtime_nsec = expect.mtime_nsec;
 }
 
-static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, struct Stat9 *stat) {
+static void pullResourceFork(int32_t cnid, uint32_t parentfid, const char *name, struct Stat9 *stat) {
 	printf("pullResourceFork\n");
 	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+12];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
-	sprintf(sidecarname, "../%s.rdump", name);
+	sprintf(sidecarname, "%s.rdump", name);
 
-	bool empty = WalkPath9(mainfid, REZFID, sidecarname);
+	bool empty = WalkPath9(parentfid, REZFID, sidecarname);
 
 	if (empty) {
 		WalkPath9(DIRFID, RESFORKFID, "");
@@ -430,9 +443,9 @@ static void pullResourceFork(int32_t cnid, uint32_t mainfid, const char *name, s
 	}
 }
 
-static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
+static void pushResourceFork(int32_t cnid, uint32_t parentfid, const char *name) {
 	printf("pushResourceFork %s", name);
-	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+16], sidecartmpname[MAXNAME+16];
+	char forkname[MAXNAME], rsname[MAXNAME], sidecarname[MAXNAME+12], sidecartmpname[MAXNAME+12];
 	sprintf(forkname, "%08lx", cnid);
 	sprintf(rsname, "%08lx-rezstat", cnid);
 	sprintf(sidecarname, "%s.rdump", name);
@@ -452,11 +465,10 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 			panic("failed create rezstat file");
 		}
 		Clunk9(CLEANRECFID);
-		WalkPath9(mainfid, TMPFID, "..");
-		Unlinkat9(TMPFID, sidecarname, 0); // no "rdump" file
+		Unlinkat9(parentfid, sidecarname, 0); // no "rdump" file
 	} else {
 		printf(" = full fork\n");
-		WalkPath9(mainfid, REZFID, "..");
+		WalkPath9(parentfid, REZFID, "");
 		if (Lcreate9(REZFID, O_WRONLY|O_TRUNC, 0666, 0, sidecartmpname, NULL, NULL)) {
 			panic("unable to create sidecar file");
 		}
@@ -468,11 +480,10 @@ static void pushResourceFork(int32_t cnid, uint32_t mainfid, const char *name) {
 		Clunk9(REZFID);
 		Clunk9(RESFORKFID);
 
-		char n1[MAXNAME+16], n2[MAXNAME+16];
+		char n1[MAXNAME+12], n2[MAXNAME+12];
 		sprintf(n1, "%s.rdump.tmp", name);
 		sprintf(n2, "%s.rdump", name);
-		WalkPath9(mainfid, TMPFID, "..");
-		Renameat9(TMPFID, n1, TMPFID, n2);
+		Renameat9(parentfid, n1, parentfid, n2);
 
 		WalkPath9(DIRFID, CLEANRECFID, "");
 		if (Lcreate9(CLEANRECFID, O_WRONLY|O_TRUNC, 0666, 0, rsname, NULL, NULL)) {

@@ -653,9 +653,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	int32_t parent, cnid = pbDirID(pb);
 	char name[MAXNAME];
 
-	if (idx > 0) {
-		printf("Find by: directory+index\n");
-
+	if (idx > 0) { // DIRID + INDEX
 		// Software commonly calls with index 1, 2, 3 etc
 		// Cache Readdir9 to avoid quadratically relisting the directory per-call
 		// An improvement might be to have multiple caches,
@@ -702,12 +700,10 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		cnid = QID2CNID(qid);
 		CatalogSet(cnid, parent, name, true/*definitive case*/);
 		WalkPath9(FIDPERSIST, FID1, name);
-	} else if (idx == 0) {
-		printf("Find by: directory+path\n");
+	} else if (idx == 0) { // DIRID + PATH
 		cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr, &parent, name);
 		if (IsErr(cnid)) return cnid;
-	} else {
-		printf("Find by: directory only\n");
+	} else { // DIRID ONLY
 		cnid = CatalogWalk(FID1, cnid, NULL, &parent, name);
 		if (IsErr(cnid)) return cnid;
 	}
@@ -765,6 +761,7 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, con
 	memset((char *)pb + 30, 0, 80 - 30);
 
 	// Determine whether the file is open
+	pb->ioFRefNum = 0;
 	struct MyFCB *fcb = UnivFirst(cnid, true);
 	if (fcb != NULL) {
 		pb->ioFlAttrib |= kioFlAttribResOpenMask | kioFlAttribFileOpenMask;
