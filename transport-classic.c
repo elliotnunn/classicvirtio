@@ -48,11 +48,26 @@ static struct SlotIntQElement slotInterruptBackstop = {
 	.sqAddr = CALLIN68K_C_ARG0_GLOBDEF(interruptCompleteStub),
 };
 
+bool VFinal(RegEntryID *id) {
+    UInt32 slotnum = id->contents[0];
+
+    device->status = 0;
+    SynchronizeIO();
+    while (device->status) {} // await 0
+
+    printf("Slot removed: 0x%04X\n", SIntRemove(&slotInterrupt, slotnum));
+    printf("Slot backstop removed: 0x%04X\n", SIntRemove(&slotInterruptBackstop, slotnum));
+    SynchronizeIO();
+
+    return true;
+}
+
 // returns true for OK
 bool VInit(RegEntryID *id) {
+    // Fixes complaint about storing unsigned int in a signed int type. --peads
 	// Work around a shortcoming in global initialisation
-	int slotnum = id->contents[0];
-	int devindex = id->contents[1];
+    UInt32 slotnum = id->contents[0];
+    UInt32 devindex = id->contents[1];
 
 	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
 	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
@@ -76,10 +91,10 @@ bool VInit(RegEntryID *id) {
 	while (device->status) {} // wait till 0
 
 	// 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-	device->status = 1;
-	SynchronizeIO();
+    device->status = 1;
+    SynchronizeIO();
 
-	// 3. Set the DRIVER status bit: the guest OS knows how to drive the device.
+    // 3. Set the DRIVER status bit: the guest OS knows how to drive the device.
 	device->status = 1 | 2;
 	SynchronizeIO();
 
@@ -102,7 +117,7 @@ bool VInit(RegEntryID *id) {
 // Negotiate features
 bool VGetDevFeature(uint32_t number) {
 	SynchronizeIO();
-	device->deviceFeaturesSel = number / 32;
+	device->deviceFeaturesSel = number >> 5;
 	SynchronizeIO();
 	return (device->deviceFeatures >> (number % 32)) & 1;
 }
@@ -112,7 +127,7 @@ void VSetFeature(uint32_t number, bool val) {
 	uint32_t bits;
 
 	SynchronizeIO();
-	device->driverFeaturesSel = number / 32;
+	device->driverFeaturesSel = number >> 5;
 	SynchronizeIO();
 
 	bits = device->driverFeatures;

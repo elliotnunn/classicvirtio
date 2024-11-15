@@ -36,6 +36,14 @@ static void poll(uint16_t q);
 
 static struct virtq queues[MAX_VQ];
 
+uint16_t QFinal(uint16_t q, uint16_t max_size) {
+    if (q >= MAX_VQ) return 0;
+
+    FreePages(queues[q].desc);
+
+    return --queues[q].size;
+}
+
 uint16_t QInit(uint16_t q, uint16_t max_size) {
 	if (q >= MAX_VQ) return 0;
 

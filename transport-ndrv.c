@@ -33,6 +33,11 @@ static bool gSuppressNotification;
 static InterruptMemberNumber interrupt(InterruptSetMember ist, void *refCon, uint32_t intCount);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 
+bool VFinal(RegEntryID *dev) {
+    // stub
+    return true;
+}
+
 // For PCI devices, the void pointer is a RegEntryIDPtr.
 // Leave the device in DRIVER status.
 bool VInit(RegEntryID *dev) {

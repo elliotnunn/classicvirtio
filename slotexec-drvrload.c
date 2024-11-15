@@ -139,7 +139,9 @@ void exec(struct SEBlock *pb) {
 	HLock(hdl);
 	struct drvr *drvr = (struct drvr *)*hdl;
 
-	drvr->flags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dWritEnableMask|dReadEnableMask;
+    // Added goodbye mask, s.t. it can be finalized on starting A/UX --peads
+	drvr->flags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dWritEnableMask|dReadEnableMask
+            |dNeedGoodByeMask;
 	drvr->open = drvr->prime = drvr->ctl = drvr->status = drvr->close = offsetof(struct drvr, code);
 
 	const char *name = slotStruct(slot, srsrc, sRsrcName, 0);

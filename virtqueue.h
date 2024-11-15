@@ -8,6 +8,7 @@
 
 // Create a descriptor ring for this virtqueue, return actual size
 uint16_t QInit(uint16_t q, uint16_t max_size);
+uint16_t QFinal(uint16_t q, uint16_t max_size);
 
 // Never blocks, just panics if not enough descriptors available
 void QSend(
