@@ -94,7 +94,7 @@ build/ndrv/ndrv-%.so: device-%.c $(SUPPORT_NDRV) ndrv.exp ndrv.lds
 		-Os -ffunction-sections -fdata-sections \
 		-T ndrv.lds -Wl,-bE:ndrv.exp -Wl,--gc-sections -Wl,--gc-keep-exported \
 		$< $(SUPPORT_NDRV) \
-		-lStdCLib -lDriverServicesLib -lNameRegistryLib -lPCILib -lVideoServicesLib -lInterfaceLib -lControlsLib
+		-lStdCLib -lDriverServicesLib -lNameRegistryLib -lPCILib -lVideoServicesLib -lDriverLoaderLib -lInterfaceLib -lControlsLib
 
 build/ndrv/ndrv-%: build/ndrv/ndrv-%.so
 	MakePEF -o $@ $^

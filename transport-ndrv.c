@@ -33,36 +33,47 @@ static bool gSuppressNotification;
 static InterruptMemberNumber interrupt(InterruptSetMember ist, void *refCon, uint32_t intCount);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 
-// For PCI devices, the void pointer is a RegEntryIDPtr.
 // Leave the device in DRIVER status.
-bool VInit(RegEntryID *dev) {
+bool VInit(short refNum) {
+	static RegEntryID dev;
+	GetDriverInformation(refNum,
+		(UnitNumber []){0},             // junk
+		(DriverFlags []){0},            // junk
+		(DriverOpenCount []){0},        // junk
+		(Str255){},                     // junk
+		&dev,                           // return value of interest
+		&(CFragSystem7Locator){.u={.onDisk={.fileSpec=&(FSSpec){}}}}, // junk that needs valid ptr
+		(CFragConnectionID []){0},      // junk
+		(DriverEntryPointPtr []){NULL}, // junk
+		(DriverDescription []){{}});    // junk
+
 	void *bars[6];
-	findLogicalBARs(dev, bars);
+	findLogicalBARs(&dev, bars);
 
 	// PCI configuration structures point to addresses we need within the BARs
 	uint8_t cap_offset;
-	for (ExpMgrConfigReadByte(dev, (LogicalAddress)0x34, &cap_offset);
+	for (ExpMgrConfigReadByte(&dev, (LogicalAddress)0x34, &cap_offset);
 		cap_offset != 0;
-		ExpMgrConfigReadByte(dev, (LogicalAddress)(cap_offset+1), &cap_offset)) {
+		ExpMgrConfigReadByte(&dev, (LogicalAddress)(cap_offset+1), &cap_offset)) {
 
 		uint8_t cap_vndr, cfg_type, bar;
 		uint32_t offset;
 		void *address;
 
 		// vendor-specific capability struct, i.e. a "VIRTIO_*" one
-		ExpMgrConfigReadByte(dev, (LogicalAddress)(uint32_t)cap_offset, &cap_vndr);
+		ExpMgrConfigReadByte(&dev, (LogicalAddress)(uint32_t)cap_offset, &cap_vndr);
 		if (cap_vndr != 9) continue;
 
-		ExpMgrConfigReadByte(dev, (LogicalAddress)(cap_offset+3), &cfg_type);
-		ExpMgrConfigReadByte(dev, (LogicalAddress)(cap_offset+4), &bar);
-		ExpMgrConfigReadLong(dev, (LogicalAddress)(cap_offset+8), &offset);
+		ExpMgrConfigReadByte(&dev, (LogicalAddress)(cap_offset+3), &cfg_type);
+		ExpMgrConfigReadByte(&dev, (LogicalAddress)(cap_offset+4), &bar);
+		ExpMgrConfigReadLong(&dev, (LogicalAddress)(cap_offset+8), &offset);
 		address = (char *)bars[bar] + offset;
 
 		if (cfg_type == 1 && !gCommonConfig) {
 			gCommonConfig = address;
 		} else if (cfg_type == 2 && !gNotify) {
 			gNotify = address;
-			ExpMgrConfigReadLong(dev, (LogicalAddress)(cap_offset+16), &gNotifyMultiplier);
+			ExpMgrConfigReadLong(&dev, (LogicalAddress)(cap_offset+16), &gNotifyMultiplier);
 		} else if (cfg_type == 3 && !gISRStatus) {
 			gISRStatus = address;
 		} else if (cfg_type == 4 && !VConfig) {
@@ -74,9 +85,9 @@ bool VInit(RegEntryID *dev) {
 
 	// Incantation to enable memory-mapped access
 	uint16_t pci_status = 0;
-	ExpMgrConfigReadWord(dev, (LogicalAddress)4, &pci_status);
+	ExpMgrConfigReadWord(&dev, (LogicalAddress)4, &pci_status);
 	pci_status |= 2;
-	ExpMgrConfigWriteWord(dev, (LogicalAddress)4, pci_status);
+	ExpMgrConfigWriteWord(&dev, (LogicalAddress)4, pci_status);
 
 	VMaxQueues = gCommonConfig->num_queues;
 
@@ -109,7 +120,7 @@ bool VInit(RegEntryID *dev) {
 		struct InterruptSetMember ist = {0};
 		RegPropertyValueSize size = sizeof(ist);
 
-		RegistryPropertyGet(dev, "driver-ist", (void *)&ist, &size);
+		RegistryPropertyGet(&dev, "driver-ist", (void *)&ist, &size);
 		GetInterruptFunctions(ist.setID, ist.member, &oldRefCon, &oldHandler, &enabler, &disabler);
 		InstallInterruptFunctions(ist.setID, ist.member, NULL, interrupt, NULL, NULL);
 

@@ -5,15 +5,13 @@
 
 #pragma once
 
-#include <NameRegistry.h>
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-// The void pointer somehow identifies the PCI or MMIO device
+// The reference number is enough to find the underlying hardware
 // returns true for OK
-bool VInit(RegEntryID *dev);
+bool VInit(short refNum);
 
 // Sets these globals
 extern void *VConfig;

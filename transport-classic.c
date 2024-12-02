@@ -26,11 +26,13 @@ struct goldfishPIC {
 
 static long interrupt(void);
 static long interruptCompleteStub(void);
+static void whoami(short refNum);
 
 // Globals declared in transport.h, define here
 void *VConfig;
 uint16_t VMaxQueues;
 
+static int slot; // these three variables are set by whoami()
 static volatile struct virtioMMIO *device;
 static volatile struct goldfishPIC *pic;
 
@@ -49,20 +51,9 @@ static struct SlotIntQElement slotInterruptBackstop = {
 };
 
 // returns true for OK
-bool VInit(RegEntryID *id) {
-	// Work around a shortcoming in global initialisation
-	int slotnum = id->contents[0];
-	int devindex = id->contents[1];
-
-	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
-	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
-	VConfig = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1) + 0x100);
-
-	SynchronizeIO();
-	if (device->magicValue != 0x74726976) return false;
-	SynchronizeIO();
-	if (device->version != 2) return false;
-	SynchronizeIO();
+bool VInit(short refNum) {
+	whoami(refNum);
+	VConfig = (void *)&device->config;
 
 	// MUST read deviceID and status in that order
 	if (device->deviceID == 0) return false;
@@ -90,10 +81,10 @@ bool VInit(RegEntryID *id) {
 	}
 	VSetFeature(32, true);
 
-	if (SIntInstall(&slotInterrupt, slotnum)) return false;
-	if (SIntInstall(&slotInterruptBackstop, slotnum)) return false;
+	if (SIntInstall(&slotInterrupt, slot)) return false;
+	if (SIntInstall(&slotInterruptBackstop, slot)) return false;
 
-	pic->enable = 0xffffffff;
+	pic->enable = 0xffffffff; // enable all sources, don't discriminate
 	SynchronizeIO();
 
 	return true;
@@ -194,4 +185,47 @@ static long interrupt(void) {
 // from interrupt, but we got occasional dsBadSlotInt crashes.
 static long interruptCompleteStub(void) {
 	return 1; // "did handle"
+}
+
+// This driver has been started by the system to drive a numbered sResource (128-254) of a numbered slot.
+// Which differently-numbered virtio device (0-31) does this correspond to within the slot?
+// Choose like this: determine that we are the Nth sResource of a particular type (Block, 9P...)
+// and therefore choose the Nth virtio device of that type.
+static void whoami(short refNum) {
+	// first, slot number
+	slot = 255 & (*(AuxDCEHandle)GetDCtlEntry(refNum))->dCtlSlot;
+	int resNum = 255 & (*(AuxDCEHandle)GetDCtlEntry(refNum))->dCtlSlotId;
+
+	pic = (struct goldfishPIC *)(0xf0000000UL + ((long)slot<<24)); // the 32 virtio devices share a goldfish
+
+	struct SpBlock sp = {.spSlot=slot, .spID=resNum};
+	SGetSRsrc(&sp);
+	int type = 255 & sp.spDrvrHW; // the last field of "sRsrcType" in the declaration ROM
+
+	// Is this the 1st Block sResource? The 4th?
+	int nth = 0;
+	for (int i=128; i<resNum; i++) {
+		struct SpBlock sp = {.spSlot=slot, .spID=i};
+		if (SGetSRsrc(&sp) == noErr && (255 & sp.spDrvrHW) == type) {
+			nth++;
+		}
+	}
+
+	// Then which of the 32 virtio devices does that correspond with?
+	// Count device types (e.g. 3 of Block, 1 of Input)
+	for (int i=31; i>=0; i--) { // reverse-iterate to match command line order
+		device = (struct virtioMMIO *)(0xf0000000UL + ((long)slot<<24) + 0x200 + 0x200*i);
+
+		if (device->magicValue != 0x74726976) continue;
+		SynchronizeIO();
+		if (device->version != 2) continue;
+		SynchronizeIO();
+		if (device->deviceID != type) continue;
+		if (nth > 0) {
+			nth--;
+			continue;
+		}
+		return; // got it
+	}
+	SysError(0xd0d0);
 }

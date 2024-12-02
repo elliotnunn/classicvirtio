@@ -4,6 +4,8 @@
 // Driver for virtio-9p under the Macintosh File Manager
 // See ARCHITECTURE.md for discussion
 
+#include <CodeFragments.h>
+#include <Devices.h>
 #include <Disks.h>
 #include <DriverGestalt.h>
 #include <DriverServices.h>
@@ -138,8 +140,6 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-RegEntryID regentryid;
-
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
@@ -209,11 +209,10 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
-	regentryid = info->deviceEntry;
 	InitLog();
 	sprintf(LogPrefix, "9P(%d) ", info->refNum);
 
-	if (!VInit(&info->deviceEntry)) {
+	if (!VInit(info->refNum)) {
 		printf("Transport layer failure\n");
 		return openErr;
 	};
@@ -1671,8 +1670,23 @@ static OSErr cDriveInfo(struct CntrlParam *pb) {
 
 // Essential to boot from 9P
 static OSErr dgNameRegistryEntry(struct DriverGestaltParam *pb) {
-	pb->driverGestaltResponse = (long)&regentryid;
+#if GENERATINGCFM // PowerPC NDRV
+	static RegEntryID dev;
+	GetDriverInformation(drvrRefNum,
+		(UnitNumber []){0},             // junk
+		(DriverFlags []){0},            // junk
+		(DriverOpenCount []){0},        // junk
+		(Str255){},                     // junk
+		&dev,                           // return value of interest
+		&(CFragSystem7Locator){.u={.onDisk={.fileSpec=&(FSSpec){}}}}, // junk that needs valid ptr
+		(CFragConnectionID []){0},      // junk
+		(DriverEntryPointPtr []){NULL}, // junk
+		(DriverDescription []){{}});    // junk
+	pb->driverGestaltResponse = (long)&dev;
 	return noErr;
+#else // 68k DRVR
+	return statusErr;
+#endif
 }
 
 // Essential to boot from 9P

@@ -98,7 +98,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	InitLog();
 	sprintf(LogPrefix, "Input(%d) ", info->refNum);
 
-	if (!VInit(&info->deviceEntry)) {
+	if (!VInit(info->refNum)) {
 		printf("Transport layer failure\n");
 		VFail();
 		return openErr;

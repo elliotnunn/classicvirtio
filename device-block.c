@@ -110,7 +110,6 @@ static struct fixedbuf *fixedbuf;
 static uint32_t pfixedbuf;
 static int buffers; // more buffers means more fragmentation tolerated
 static short drvrRefNum;
-static RegEntryID regentryid;
 uint32_t firstblock, numblocks;
 static struct DrvSts2 dqe = {
 	.track = 0,       // not for us
@@ -196,11 +195,10 @@ static OSStatus finalize(DriverFinalInfo *info) {
 
 static OSStatus initialize(DriverInitInfo *info) {
 	drvrRefNum = info->refNum;
-	regentryid = info->deviceEntry;
 	InitLog();
 	sprintf(LogPrefix, "Block(%d) ", info->refNum);
 
-	if (!VInit(&info->deviceEntry)) {
+	if (!VInit(info->refNum)) {
 		printf("Transport layer failure\n");
 		VFail();
 		return openErr;
@@ -433,8 +431,23 @@ static OSErr sDriveStatus(struct CntrlParam *pb) {
 
 // Essential to boot from 9P
 static OSErr dgNameRegistryEntry(struct DriverGestaltParam *pb) {
-	pb->driverGestaltResponse = (long)&regentryid;
+#if GENERATINGCFM // PowerPC NDRV
+	static RegEntryID dev;
+	GetDriverInformation(drvrRefNum,
+		(UnitNumber []){0},             // junk
+		(DriverFlags []){0},            // junk
+		(DriverOpenCount []){0},        // junk
+		(Str255){},                     // junk
+		&dev,                           // return value of interest
+		&(CFragSystem7Locator){.u={.onDisk={.fileSpec=&(FSSpec){}}}}, // junk that needs valid ptr
+		(CFragConnectionID []){0},      // junk
+		(DriverEntryPointPtr []){NULL}, // junk
+		(DriverDescription []){{}});    // junk
+	pb->driverGestaltResponse = (long)&dev;
 	return noErr;
+#else // 68k DRVR
+	return statusErr;
+#endif
 }
 
 // Essential to boot from 9P
