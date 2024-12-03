@@ -22,7 +22,7 @@ DEVICES_NDRV = block 9p input
 
 # And these are the C files that each device-*.c depends on (some are arch-specific)
 SUPPORT := $(filter-out device-%.c,$(wildcard *.c))
-SUPPORT := $(filter-out slotexec-%.c,$(SUPPORT)) # special files
+SUPPORT := $(filter-out standalone-%.c,$(SUPPORT)) # special files
 SUPPORT := $(filter-out ndrvloader.c,$(SUPPORT)) # special file
 SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(SUPPORT))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
@@ -41,37 +41,29 @@ ALLLIBS = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a li
 
 # The classic drivers are linked together into one "card declaration ROM":
 #     qemu-system-m68k -device nubus-virtio-mmio,romfile=build/classic/declrom
-# This ROM incorporates the actual DRVRs and a few "slotexec" functions.
-SLOTEXECS = $(patsubst slotexec-%.c,%,$(wildcard slotexec-*.c))
+# This ROM incorporates the actual DRVRs and a few standalone C functions.
 build/classic/declrom: declrom.s \
 		$(patsubst %,build/classic/drvr-%.elf,$(DEVICES_CLASSIC)) \
-		$(patsubst %,build/classic/slotexec-%,$(SLOTEXECS))
+		$(patsubst standalone-%.c,build/classic/standalone-%,$(wildcard standalone-*.c))
 	m68k-apple-macos-as -o build/classic/declrom.o declrom.s
 	m68k-apple-macos-ld -o build/classic/declrom.elf build/classic/declrom.o
 	m68k-apple-macos-objcopy -O binary -j .text build/classic/declrom.elf $@
 	python3 scripts/calculatecrc.py $@
 
-# The "slotexec" helper functions are also needed in the declaration ROM,
-# but are built using different compiler options (PC-relative addressing FYI)
-build/classic/slotexec-%.o: slotexec-%.c
-	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -Os -mpcrel -o $@ $^
+# The standalone functions built using different compiler options (PC-relative addressing FYI)
+build/classic/standalone-%: standalone-%.c standalone68k.lds
+	m68k-apple-macos-gcc $(CDEFS) -c -m68040 -O0 -mpcrel -o $@.o $<
+	m68k-apple-macos-ld --no-warn-rwx-segments -e 0 --script standalone68k.lds -o $@.elf $@.o $(ALLLIBS)
+	m68k-apple-macos-objcopy -O binary -j .text $@.elf $@
 
-# Wrap an "sExecBlock" header around the slotexec code using a linker script
-build/classic/slotexec-%.elf: slotexec.lds build/classic/slotexec-%.o
-	m68k-apple-macos-ld --no-warn-rwx-segments -o $@ --script $^ $(ALLLIBS)
-
-# Extract the "sExecBlock" from an ELF, ready for inclusion in the decl ROM
-build/classic/slotexec-%: build/classic/slotexec-%.elf
-	m68k-apple-macos-objcopy -O binary -j .exec $^ $@
-
-# Compile the DRVR code files (slotexec code has different compiler options)
+# Compile the DRVR code files with an A5 global model
 build/classic/%.o: %.c
 	m68k-apple-macos-gcc $(CDEFS) $(INSTRUMENT) -c -m68040 -Os -msep-data -ffunction-sections -fdata-sections -o $@ $<
 
-# Link each driver into an ELF, which will be DRVRised by slotexec-drvrload.c
+# Link each driver into an ELF, which will be included in the declaration ROM
 # This code uses A5-refs (-msep-data) so we cannot use the Retro68 libc, but Interfaces are fine
-build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/jumpglue.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC)) $(wildcard  a5libs/*.a)
-	m68k-apple-macos-ld.real -Ttext-segment 0xcd790000 -e drvrROMEntry --gc-sections -o $@ --script $^ $(INTERFACEONLY)
+build/classic/drvr-%.elf: drvr.lds build/classic/jumpglue.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC)) $(wildcard  a5libs/*.a)
+	m68k-apple-macos-ld.real -Ttext-segment 0xcd790000 -e asmOpen --gc-sections -o $@ --script $^ $(INTERFACEONLY)
 
 # The DRVR has some assembly code to call through to C
 build/classic/%.o: %.s

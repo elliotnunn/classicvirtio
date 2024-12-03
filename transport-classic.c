@@ -55,12 +55,6 @@ bool VInit(short refNum) {
 	whoami(refNum);
 	VConfig = (void *)&device->config;
 
-	// MUST read deviceID and status in that order
-	if (device->deviceID == 0) return false;
-	SynchronizeIO();
-	if (device->status != 0) return false;
-	SynchronizeIO();
-
 	// 1. Reset the device.
 	device->status = 0;
 	SynchronizeIO();
@@ -216,6 +210,7 @@ static void whoami(short refNum) {
 	for (int i=31; i>=0; i--) { // reverse-iterate to match command line order
 		device = (struct virtioMMIO *)(0xf0000000UL + ((long)slot<<24) + 0x200 + 0x200*i);
 
+		// Spec says these three registers MUST be read in this order at init time
 		if (device->magicValue != 0x74726976) continue;
 		SynchronizeIO();
 		if (device->version != 2) continue;

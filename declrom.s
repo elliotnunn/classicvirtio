@@ -100,6 +100,90 @@ SEBlock.size:
 	.set noQueueBit, 9
 	.set dCtlSlot, 40
 
+/* The SlotMgr helpfully copies "slotExec" code blocks into scratch RAM to run.
+ * Jump back to ROM so our code can take valid function pointers from itself.
+ */
+	.macro  SlotExecROMStub
+	.long   20f-.                      /* my length */
+	.long   0x02010000                 /* struct version / 68000 / reserved */
+	.long   4                          /* offset to code (i.e. right here) */
+	clr.l   %d0
+	move.b  (%a0),%d0                  /* get seSlot */
+	move.b  #12,%d0                    /* HACK for when seSlot is actually incorrect */
+	ror.l   #8,%d0                     /* move to 0F000000 position */
+	add.l   #20f-ROMEND+0xf1000000,%d0 /* tricky delta */
+	move.l  %d0,%a1
+	jmp     (%a1)                      /* to the ROM copy of the next instruction */
+	20:
+	.endm
+
+
+/* Put A0 on the stack for C code like this: void func(void *a0);
+ */
+	.macro  SlotExecCShim
+	movem.l %d0-%d7/%a0-%a6,-(%sp)
+	move.l  %a0,-(%sp)
+	bsr.s   30f
+	addq    #4,%sp
+	movem.l (%sp)+,%d0-%d7/%a0-%a6
+	clr.l   %d0
+	rts
+	30:
+	.endm
+
+
+	.macro  StubDriver myname
+	.long   69f-.
+60:
+	.short  0x4f00              /* needtime + all calls enabled */
+	.short  0                   /* drvrDelay */
+	.short  0                   /* drvrEMask */
+	.short  0                   /* drvrMenu */
+	.short  66f-60b             /* open */
+	.short  62f-60b             /* prime */
+	.short  63f-60b             /* control */
+	.short  64f-60b             /* status */
+	.short  65f-60b             /* close */
+	.byte   61f-.-1             /* name length byte */
+	.ascii  ".\myname"
+61:
+	.align 2
+	.short 0x0100               /* driver v1.0 */
+
+62:                             /* lots of illegal instructions to fill in later */
+	.short  0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc
+63:
+	.short  0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc
+64:
+	.short  0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc
+65:
+	.short  0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc, 0x4afc
+
+66:
+	moveq   #56/4-1,%d0         /* make an SpBlock */
+67:
+	clr.l   -(%sp)
+	dbf     %d0,67b
+	move.l  %sp,%a0
+	move.b  40(%a1),49(%a0)     /* slot number into spBlock */
+	move.b  41(%a1),50(%a0)     /* sResource number into spBlock */
+
+	moveq   #11,%d0
+	.short  0xa06e              /* call SGetSRsrc */
+	move.l  4(%a0),%a2          /* this is the sResource pointer in ROM */
+	lea     56(%sp),%sp
+
+68:
+	cmp.w   #0x6004,(%a2)+      /* scan for magic number inside ELF code */
+	bne.s   68b
+	cmp.w   #0x6f70,(%a2)+
+	bne.s   68b
+	cmp.w   #0x656e,(%a2)+
+	bne.s   68b
+	jmp     (%a2)
+69:
+	.endm
+
 
 	.globl _start
 	.section .text
@@ -148,7 +232,9 @@ BoardName:
 	.asciz "Virtio bus"
 	.align 2
 PrimaryInitRec:
-	.incbin "build/classic/slotexec-primaryinit"
+	SlotExecROMStub
+	SlotExecCShim
+	.incbin "build/classic/standalone-primaryinit"
 
 VendorInfoRec:
 	OSLstEntry vendorId, VendorId
@@ -221,11 +307,10 @@ CicnEnd:
 Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
-	OSLstEntry sRsrcLoadRec, SharedDriverLoader
+	OSLstEntry sRsrcDrvrDir, 3$
 	OSLstEntry sRsrcBootRec, BootRec
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
-	OSLstEntry 199, 3$
 	DatLstEntry endOfList, 0
 1$:
 	.short catCPU
@@ -236,16 +321,19 @@ Resource9P:
 	.asciz "Virtio9P" /* without a leading dot */
 	.align 2
 3$:
+	OSLstEntry sCPU_68020, 4$
+	DatLstEntry endOfList, 0
+4$:
+	StubDriver Virtio9P
 	.incbin "build/classic/drvr-9p.elf"
 
 ResourceBlock:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
-	OSLstEntry sRsrcLoadRec, SharedDriverLoader
+	OSLstEntry sRsrcDrvrDir, 3$
 	OSLstEntry sRsrcBootRec, BootRec
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
-	OSLstEntry 199, 3$
 	DatLstEntry endOfList, 0
 1$:
 	.short catCPU
@@ -256,15 +344,18 @@ ResourceBlock:
 	.asciz "VirtioBlock" /* without a leading dot */
 	.align 2
 3$:
+	OSLstEntry sCPU_68020, 4$
+	DatLstEntry endOfList, 0
+4$:
+	StubDriver VirtioBlock
 	.incbin "build/classic/drvr-block.elf"
 
 ResourceInput:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
-	OSLstEntry sRsrcLoadRec, SharedDriverLoader
+	OSLstEntry sRsrcDrvrDir, 3$
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
-	OSLstEntry 199, 3$
 	DatLstEntry endOfList, 0
 1$:
 	.short catCPU
@@ -275,14 +366,16 @@ ResourceInput:
 	.asciz "VirtioInput" /* without a leading dot */
 	.align 2
 3$:
+	OSLstEntry sCPU_68020, 4$
+	DatLstEntry endOfList, 0
+4$:
+	StubDriver VirtioInput
 	.incbin "build/classic/drvr-input.elf"
 
-/* Work around the 64K driver limitation in the Slot Manager */
-SharedDriverLoader:
-	.incbin "build/classic/slotexec-drvrload"
-
 BootRec:
-	.incbin "build/classic/slotexec-boot"
+	SlotExecROMStub
+	SlotExecCShim
+	.incbin "build/classic/standalone-boot"
 
 /* Pad so that, after the header, this ROM is a multiple of 4K */
 /* Works around a suspected QEMU bug: */

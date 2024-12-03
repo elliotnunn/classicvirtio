@@ -10,7 +10,7 @@
 
 #include "structs-mmio.h"
 
-// Our job is to delete sResources that are excess to the 32 virtio devices we actually have
+// Must be the first function in the file
 void exec(struct SEBlock *pb) {
 	void *base = (void *)0xf0000000 + ((long)pb->seSlot << 24);
 

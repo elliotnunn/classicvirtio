@@ -68,8 +68,6 @@ struct longdqe {
 	void *dispatcher;
 };
 
-static OSStatus finalize(DriverFinalInfo *info);
-static OSStatus initialize(DriverInitInfo *info);
 static void installDrive(void);
 static void installExtFS(void);
 static void getBootBlocks(void);
@@ -86,8 +84,6 @@ static bool visName(const char *name);
 static int32_t mactime(int64_t unixtime);
 static long fsCall(void *pb, long selector);
 static OSErr fsDispatch(void *pb, unsigned short selector);
-static OSErr controlStatusCall(struct CntrlParam *pb);
-static OSErr controlStatusDispatch(long selector, void *pb);
 
 static short drvrRefNum;
 extern struct Qid9 root;
@@ -140,59 +136,23 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
-	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
-	OSStatus err;
-
-	if (code <= 6) {
-		printf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
-	}
-
-	switch (code) {
-	case kInitializeCommand:
-	case kReplaceCommand:
-		err = initialize(pb.initialInfo);
-		break;
-	case kFinalizeCommand:
-	case kSupersededCommand:
-		err = finalize(pb.finalInfo);
-		break;
-	case kControlCommand:
-	case kStatusCommand:
-		err = controlStatusCall(&(*pb.pb).cntrlParam);
-		break;
-	case kOpenCommand:
-	case kCloseCommand:
-		err = noErr;
-		break;
-	case kReadCommand: {
-		struct IOParam *param = &pb.pb->ioParam;
-		param->ioActCount = param->ioReqCount;
-		for (long i=0; i<param->ioReqCount; i++) {
-			if (param->ioPosOffset+i < sizeof bootBlocks) {
-				param->ioBuffer[i] = bootBlocks[i];
-			} else {
-				param->ioBuffer[i] = 0;
-			}
+int DriverRead(IOParam *pb) {
+	if (LogEnable) printf("Drvr_%s", PBPrint(pb, pb->ioTrap|0xa000, 1));
+	pb->ioActCount = pb->ioReqCount;
+	for (long i=0; i<pb->ioReqCount; i++) {
+		if (pb->ioPosOffset+i < sizeof bootBlocks) {
+			pb->ioBuffer[i] = bootBlocks[i];
+		} else {
+			pb->ioBuffer[i] = 0;
 		}
-		err = noErr;
-		break;
-		}
-	default:
-		err = paramErr;
-		break;
 	}
+	int err = noErr;
+	if (LogEnable) printf("%s", PBPrint(pb, pb->ioTrap|0xa000, err));
+	return err;
+}
 
-	if (code <= 6) {
-		printf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
-	}
-
-	// Return directly from every call
-	if (kind & kImmediateIOCommandKind) {
-		return err;
-	} else {
-		return IOCommandIsComplete(cmdID, err);
-	}
+int DriverWrite(IOParam *pb) {
+	return writErr;
 }
 
 void DNotified(uint16_t q, volatile uint32_t *retlen) {
@@ -201,18 +161,17 @@ void DNotified(uint16_t q, volatile uint32_t *retlen) {
 void DConfigChange(void) {
 }
 
-
-static OSStatus finalize(DriverFinalInfo *info) {
+int DriverStop(void) {
 	return noErr;
 }
 
-static OSStatus initialize(DriverInitInfo *info) {
+int DriverStart(short refNum) {
 	// Debug output
-	drvrRefNum = info->refNum;
+	drvrRefNum = refNum;
 	InitLog();
-	sprintf(LogPrefix, "9P(%d) ", info->refNum);
+	sprintf(LogPrefix, "9P(%d) ", refNum);
 
-	if (!VInit(info->refNum)) {
+	if (!VInit(refNum)) {
 		printf("Transport layer failure\n");
 		return openErr;
 	};
@@ -1726,38 +1685,45 @@ static OSErr dgDeviceType(struct DriverGestaltParam *pb) {
 	return noErr;
 }
 
-static OSErr controlStatusCall(struct CntrlParam *pb) {
-	// Coerce csCode or driverGestaltSelector into one long
-	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
-	// (Assume 4-byte Driver Gestalt code is ASCII, and therefore positive)
-	long selector = pb->csCode;
+int DriverCtl(CntrlParam *pb) {
+	if (LogEnable) printf("Drvr_%s", PBPrint(pb, pb->ioTrap|0xa000, 1));
 
-	if (selector == kDriverGestaltCode)
-		selector = ((struct DriverGestaltParam *)pb)->driverGestaltSelector;
+	int err = controlErr;
+	if (pb->csCode == accRun) {
+		err = cAccRun(pb);
+	} else if (pb->csCode == kDriveIcon) {
+		err = cIcon(pb);
+	} else if (pb->csCode == kMediaIcon) {
+		err = cIcon(pb);
+	} else if (pb->csCode == kDriveInfo) {
+		err = cDriveInfo(pb);
+	}
 
-	if ((pb->ioTrap & 0xff) == (_Status & 0xff))
-		selector = -selector;
-
-	return controlStatusDispatch(selector, pb);
+	if (LogEnable) printf("%s", PBPrint(pb, pb->ioTrap|0xa000, err));
+	return err;
 }
 
-static OSErr controlStatusDispatch(long selector, void *pb) {
-	switch (selector) {
-	case accRun: return cAccRun(pb);
-	case kDriveIcon: return cIcon(pb);
-	case kMediaIcon: return cIcon(pb);
-	case kDriveInfo: return cDriveInfo(pb);
-	case -'nmrg': return dgNameRegistryEntry(pb);
-	case -'ofpt': case -'ofbt': return dgOpenFirmwareBoot(pb);
-	case -'boot': return dgBoot(pb);
- 	case -'dvrf': return dgDeviceReference(pb);
-	case -'intf': return dgInterface(pb);
- 	case -'devt': return dgDeviceType(pb);
-	default:
-		if (selector > 0) {
-			return controlErr;
-		} else {
-			return statusErr;
+int DriverStatus(CntrlParam *pb) {
+	if (LogEnable) printf("Drvr_%s", PBPrint(pb, pb->ioTrap|0xa000, 1));
+
+	int err = statusErr;
+	if (pb->csCode == kDriverGestaltCode) {
+		DriverGestaltParam *gpb = (DriverGestaltParam *)pb;
+		if (gpb->driverGestaltSelector == 'nmrg') {
+			err = dgNameRegistryEntry(gpb);
+		} else if (gpb->driverGestaltSelector == 'ofpt' || gpb->driverGestaltSelector == 'ofbt') {
+			err = dgOpenFirmwareBoot(gpb);
+		} else if (gpb->driverGestaltSelector == 'boot') {
+			err = dgBoot(gpb);
+		} else if (gpb->driverGestaltSelector == 'dvrf') {
+			err = dgDeviceReference(gpb);
+		} else if (gpb->driverGestaltSelector == 'intf') {
+			err = dgInterface(gpb);
+		} else if (gpb->driverGestaltSelector == 'devt') {
+			err = dgDeviceType(gpb);
 		}
 	}
+
+	if (LogEnable) printf("%s", PBPrint(pb, pb->ioTrap|0xa000, err));
+	return err;
 }
