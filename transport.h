@@ -29,3 +29,6 @@ void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_
 
 // Tell the device about a change to the avail ring
 void VNotify(uint16_t queue);
+
+// Quiesce the device (no more notifications)
+void VReset(void);

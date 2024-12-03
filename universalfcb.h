@@ -55,6 +55,7 @@ struct MyFCB *UnivGetFCB(short refnum); // returns NULL on invalid arg
 struct MyFCB *UnivMustGetFCB(short refnum); // panics on invalid arg
 struct MyFCB *UnivFirst(uint32_t cnid, bool resfork);
 struct MyFCB *UnivNext(struct MyFCB *fcb);
+void UnivCloseAll(void);
 
 // Example loop:
 // for (struct MyFCB *fcb=UnivFirst(cnid, resfork); fcb!=NULL; fcb=UnivNext(fcb)) {}

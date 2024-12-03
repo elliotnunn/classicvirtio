@@ -29,6 +29,7 @@ Read-only for now.
 #include <string.h>
 
 #include "allocator.h"
+#include "cleanup.h"
 #include "log.h"
 #include "panic.h"
 #include "paramblkprint.h"
@@ -83,7 +84,8 @@ struct fixedbuf {
 	char sector[512];
 } ;
 
-static void installDrive(struct DrvQEl *drive, short driverRef);
+static void installDrive(void);
+static void removeDrive(void);
 static struct DrvQEl *findDrive(short num);
 static void *readSector(int which);
 static OSErr stressfulGetPhysical(LogicalToPhysicalTable *addresses, unsigned long *physicalEntryCount);
@@ -138,7 +140,17 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
+// Remember that this only needs to allow/deny the request, cleanup.c handles the rest
 int DriverStop(void) {
+	// Search the volume queue for a mounted+online volume pointing to us
+	for (VCB *vcb=GetVCBQHdr()->qHead; vcb!=NULL&&vcb!=(VCB *)-1; vcb=(VCB *)vcb->qLink) {
+		if (vcb->vcbDrvNum == dqe.dQDrive) {
+			printf("Refusing to stop while volume is mounted\n");
+			return closErr;
+		}
+	}
+
+	printf("Stopping\n");
 	return noErr;
 }
 
@@ -149,32 +161,29 @@ int DriverStart(short refNum) {
 
 	if (!VInit(refNum)) {
 		printf("Transport layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	};
 
 	dqe.writeProt = 0x80 * VGetDevFeature(5); // VIRTIO_BLK_F_RO
 	VSetFeature(5, VGetDevFeature(5)); // SHOULD use feature if offered
 	if (!VFeaturesOK()) {
 		printf("Feature negotiation failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	fixedbuf = AllocPages(1, &pfixedbuf);
 	if (fixedbuf == NULL) {
 		printf("Memory allocation failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
+	RegisterCleanupVoidPtr(FreePages, fixedbuf);
 
 	VDriverOK();
 
 	buffers = QInit(0, MAXBUFFERS);
 	if (buffers < 4) {
 		printf("Virtqueue layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	// Probe the disk
@@ -191,13 +200,18 @@ int DriverStart(short refNum) {
 	dqe.driveSize = numblocks;
 	dqe.driveS1 = numblocks >> 16;
 
-	installDrive((void *)&dqe.qLink, drvrRefNum);
+	installDrive();
+	RegisterCleanup(removeDrive);
+
 	if (*(char *)0x14a >= 0) { // check whether Event Mgr is actually up
 		PostEvent(diskEvt, dqe.dQDrive);
 	}
 
 	printf("Ready\n");
 	return noErr;
+openErr:
+	VFail();
+	return openErr;
 }
 
 int DriverRead(IOParam *pb) {
@@ -245,11 +259,21 @@ int DriverWrite(IOParam *pb) {
 	return writErr;
 }
 
-static void installDrive(struct DrvQEl *drive, short driverRef) {
+static void installDrive(void) {
 	short driveNum = 8; // conventional lowest number for HD
 	while (findDrive(driveNum) != NULL) driveNum++;
-	AddDrive(driverRef, driveNum, drive);
+	AddDrive(drvrRefNum, driveNum, (DrvQEl *)&dqe.qLink);
+	printf("Drive number: %d\n", dqe.dQDrive);
 }
+
+static void removeDrive(void) {
+	int err = Dequeue((DrvQEl *)&dqe.qLink, GetDrvQHdr());
+	printf("the dequeue call returned %d\n", err);
+}
+
+// static void removeDrive(void *drive) {
+// 	Dequeue(drive, GetDrvQHdr());
+// }
 
 static struct DrvQEl *findDrive(short num) {
 	for (struct DrvQEl *i=(struct DrvQEl *)GetDrvQHdr()->qHead;

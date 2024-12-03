@@ -21,6 +21,7 @@
 
 #include "callin68k.h"
 #include "catalog.h"
+#include "cleanup.h"
 #include "device.h"
 #include "fids.h"
 #include "log.h"
@@ -69,6 +70,7 @@ struct longdqe {
 };
 
 static void installDrive(void);
+static void removeDrive(void);
 static void installExtFS(void);
 static void getBootBlocks(void);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
@@ -161,8 +163,15 @@ void DNotified(uint16_t q, volatile uint32_t *retlen) {
 void DConfigChange(void) {
 }
 
+// Remember that this only needs to allow/deny the request, cleanup.c handles the rest
 int DriverStop(void) {
-	return noErr;
+	if (vcb.vcbVRefNum != 0) {
+		printf("Refusing to stop while volume is mounted\n");
+		return closErr;
+	} else {
+		printf("Stopping\n");
+		return noErr;
+	}
 }
 
 int DriverStart(short refNum) {
@@ -173,14 +182,13 @@ int DriverStart(short refNum) {
 
 	if (!VInit(refNum)) {
 		printf("Transport layer failure\n");
-		return openErr;
+		goto openErr;
 	};
 
 	VSetFeature(0, 1); // Request mount_tag in the config area
 	if (!VFeaturesOK()) {
 		printf("Feature negotiation failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
@@ -190,8 +198,7 @@ int DriverStart(short refNum) {
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
 		printf("Virtqueue layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 
@@ -199,13 +206,12 @@ int DriverStart(short refNum) {
 	int err9;
 	if ((err9 = Init9(viobufs)) != 0) {
 		printf("9P layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	struct Qid9 rootQID;
 	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &rootQID)) != 0) {
-		return openErr;
+		goto openErr;
 	}
 
 	#if INSTRUMENT
@@ -263,12 +269,16 @@ int DriverStart(short refNum) {
 
 	// Connect our driver to the File Manager
 	installDrive();
+	RegisterCleanup(removeDrive);
 	installExtFS();
 
 	// Switch on accRun... we post diskEvt... Finder calls MountVol
 	(*GetDCtlEntry(drvrRefNum))->dCtlFlags |= dNeedTimeMask;
 
 	return noErr;
+openErr:
+	VFail();
+	return openErr;
 }
 
 // Does not require _InitFS to have been called
@@ -277,6 +287,10 @@ static void installDrive(void) {
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
 	printf("Drive number: %d\n", dqe.dqe.dQDrive);
+}
+
+static void removeDrive(void) {
+	Dequeue((QElemPtr)&dqe.dqe, GetDrvQHdr());
 }
 
 // Through patch magic, does not require _InitFS to have been called
@@ -450,8 +464,10 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	}
 	if (dqe.dqe.qType) return volOnLinErr;
 
-	vparms.vMLocalHand = NewHandleSysClear(2);
-
+	if (vparms.vMLocalHand == NULL) {
+		vparms.vMLocalHand = NewHandleSysClear(2);
+	}
+	
 	vcb.vcbDrvNum = dqe.dqe.dQDrive;
 	vcb.vcbDRefNum = drvrRefNum;
 	vcb.vcbVRefNum = -1;
@@ -475,6 +491,33 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	// No more diskEvt spam
 	(*GetDCtlEntry(drvrRefNum))->dCtlFlags &= ~dNeedTimeMask;
+
+	return noErr;
+}
+
+static OSErr fsUnmountVol(struct IOParam *pb) {
+	UnivCloseAll();
+
+	// Close any WDs that pointed to me.
+	short tablesize = *(short *)unaligned32(0x372);
+	for (short ref=WDLO+2; ref<WDLO+tablesize; ref+=16) {
+		struct WDCBRec *rec = findWD(pb->ioVRefNum);
+		if (unaligned32(rec->wdVCBPtr) == (uint32_t)&vcb) {
+			memset(rec, 0, sizeof *rec);
+		}
+	}
+
+	// Was I the default volume? No longer.
+	if ((void *)LMGetDefVCBPtr() == (void *)&vcb) {
+		*(short *)0x352 = 0;
+		*(short *)0x354 = 0;
+		*(short *)0x384 = 0;
+	}
+
+	DisposeHandle(vparms.vMLocalHand);
+	vparms.vMLocalHand = NULL;
+
+	Dequeue((QElemPtr)&vcb, GetVCBQHdr());
 
 	return noErr;
 }
@@ -1464,7 +1507,7 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	case kFSMRename: return fsRename(pb);
 	case kFSMGetFileInfo: return fsGetFileInfo(pb);
 	case kFSMSetFileInfo: return fsSetFileInfo(pb);
-	case kFSMUnmountVol: return extFSErr;
+	case kFSMUnmountVol: return fsUnmountVol(pb);
 	case kFSMMountVol: return fsMountVol(pb);
 	case kFSMAllocate: return noErr;
 	case kFSMGetEOF: return fsGetEOF(pb);

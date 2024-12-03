@@ -10,6 +10,7 @@
 #include <PCI.h>
 
 #include "allocator.h"
+#include "cleanup.h"
 #include "device.h"
 #include "structs-pci.h"
 #include "virtqueue.h"
@@ -28,14 +29,16 @@ static uint16_t *gNotify;
 static uint32_t gNotifyMultiplier;
 static uint8_t *gISRStatus;
 static bool gSuppressNotification;
+static RegEntryID dev;
 
 // Internal routines
+static void installInterrupt(void);
+static void removeInterrupt(void);
 static InterruptMemberNumber interrupt(InterruptSetMember ist, void *refCon, uint32_t intCount);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 
 // Leave the device in DRIVER status.
 bool VInit(short refNum) {
-	static RegEntryID dev;
 	GetDriverInformation(refNum,
 		(UnitNumber []){0},             // junk
 		(DriverFlags []){0},            // junk
@@ -92,13 +95,12 @@ bool VInit(short refNum) {
 	VMaxQueues = gCommonConfig->num_queues;
 
 	// 1. Reset the device.
-	gCommonConfig->device_status = 0;
-	SynchronizeIO();
-	while (gCommonConfig->device_status) {} // wait till 0
+	VReset();
 
 	// 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
 	gCommonConfig->device_status = 1;
 	SynchronizeIO();
+	RegisterCleanup(VReset);
 
 	// 3. Set the DRIVER status bit: the guest OS knows how to drive the device.
 	gCommonConfig->device_status = 1 | 2;
@@ -112,22 +114,31 @@ bool VInit(short refNum) {
 	VSetFeature(32, true);
 
 	// Install interrupt handler
-	{
-		void *oldRefCon;
-		InterruptHandler oldHandler;
-		InterruptEnabler enabler;
-		InterruptDisabler disabler;
-		struct InterruptSetMember ist = {0};
-		RegPropertyValueSize size = sizeof(ist);
-
-		RegistryPropertyGet(&dev, "driver-ist", (void *)&ist, &size);
-		GetInterruptFunctions(ist.setID, ist.member, &oldRefCon, &oldHandler, &enabler, &disabler);
-		InstallInterruptFunctions(ist.setID, ist.member, NULL, interrupt, NULL, NULL);
-
-		enabler(ist, oldRefCon);
-	}
+	installInterrupt();
+	RegisterCleanup(removeInterrupt);
+	RegisterCleanup(VReset); // a spurious interrupt might bomb the system
 
 	return true;
+}
+
+struct InterruptSetMember intTreeSpec; // to restore later...
+static void *oldIntRefCon;
+static InterruptHandler oldIntHandler;
+static InterruptDisabler intDisabler;
+static void installInterrupt(void) { // I seriously don't understand this code
+	InterruptEnabler enabler;
+	RegPropertyValueSize size = sizeof(intTreeSpec);
+
+	RegistryPropertyGet(&dev, "driver-ist", (void *)&intTreeSpec, &size);
+	GetInterruptFunctions(intTreeSpec.setID, intTreeSpec.member, &oldIntRefCon/*to restore*/, &oldIntHandler/*to restore*/, &enabler, &intDisabler);
+	InstallInterruptFunctions(intTreeSpec.setID, intTreeSpec.member, NULL/*refcon*/, interrupt, NULL/*enabler=no change*/, NULL/*disabler=no change*/);
+
+	enabler(intTreeSpec, oldIntRefCon);
+}
+
+static void removeInterrupt(void) {
+	intDisabler(intTreeSpec, oldIntRefCon);
+	InstallInterruptFunctions(intTreeSpec.setID, intTreeSpec.member, oldIntRefCon, oldIntHandler, NULL, NULL);
 }
 
 bool VGetDevFeature(uint32_t number) {
@@ -163,9 +174,19 @@ void VDriverOK(void) {
 	SynchronizeIO();
 }
 
-void VFail(void) {
-	gCommonConfig->device_status = 0x80;
+void VReset(void) {
 	SynchronizeIO();
+	gCommonConfig->device_status = 0;
+	SynchronizeIO();
+	while (gCommonConfig->device_status) {} // wait till 0
+}
+
+void VFail(void) {
+	if (gCommonConfig != NULL) {
+		SynchronizeIO();
+		gCommonConfig->device_status = 0x80;
+		SynchronizeIO();
+	}
 }
 
 uint16_t VQueueMaxSize(uint16_t q) {

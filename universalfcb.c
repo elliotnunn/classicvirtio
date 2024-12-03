@@ -162,6 +162,21 @@ struct MyFCB *UnivNext(struct MyFCB *fcb) {
 	}
 }
 
+void UnivCloseAll(void) {
+	for (int i=0; i<sizeof lists/sizeof *lists; i++) {
+		int ref = lists[i];
+		while (ref != 0) {
+			struct MyFCB *fcb = UnivMustGetFCB(ref);
+			fcb->fcbFlNm = 0; // "closed"
+			ref = fcb->right;
+			if (ref == lists[i]) {
+				break;
+			}
+		}
+		lists[i] = 0;
+	}
+}
+
 // Is the Mac OS 9 FCB format in use?
 // This can change at early boot, and is cheap to determine anyhow.
 static int os9Format(void) {

@@ -9,6 +9,7 @@
 
 #include "ConditionalMacros.h"
 #include "allocator.h"
+#include "cleanup.h"
 #include "device.h"
 #include "interruptmask.h"
 #include "panic.h"
@@ -46,6 +47,11 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	uint32_t phys[3];
 	void *pages = AllocPages(3, phys);
 	if (pages == NULL) return 0;
+
+	// To prevent spurious DMA or interrupts, quiesce the device before freeing this queue's memory.
+	// Without VIRTIO_F_RING_RESET (spec 1.2) the other queues have to die too.
+	RegisterCleanupVoidPtr(FreePages, pages);
+	RegisterCleanup(VReset); // remember this is registered AFTER FreePages so executed BEFORE
 
 	// Underlying transport needs the physical addresses of the rings
 	VQueueSet(q, size, phys[0], phys[1], phys[2]);

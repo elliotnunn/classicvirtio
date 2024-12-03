@@ -46,7 +46,9 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
+// Remember that this only needs to allow/deny the request, cleanup.c handles the rest
 int DriverStop(void) {
+	printf("Stopping\n");
 	return noErr;
 }
 
@@ -56,21 +58,19 @@ int DriverStart(short refNum) {
 
 	if (!VInit(refNum)) {
 		printf("Transport layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	};
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) {
 		printf("Memory allocation failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
+	RegisterCleanupVoidPtr(FreePages, lpage);
 
 	if (!VFeaturesOK()) {
 		printf("Feature negotiation failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	VDriverOK();
@@ -78,8 +78,7 @@ int DriverStart(short refNum) {
 	int nbuf = QInit(0, 4096 / sizeof (struct event));
 	if (nbuf == 0) {
 		printf("Virtqueue layer failure\n");
-		VFail();
-		return openErr;
+		goto openErr;
 	}
 
 	for (int i=0; i<nbuf; i++) {
@@ -90,6 +89,9 @@ int DriverStart(short refNum) {
 
 	printf("Ready\n");
 	return noErr;
+openErr:
+	VFail();
+	return openErr;
 }
 
 int DriverRead(IOParam *pb) {

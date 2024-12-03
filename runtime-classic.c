@@ -13,6 +13,7 @@
 #include <Slots.h>
 #include <Types.h>
 
+#include "cleanup.h"
 #include "structs-elf.h"
 
 #include "runtime.h"
@@ -157,11 +158,15 @@ void cOpen(FileParam *pb, AuxDCE *dce) {
 
 	// Setting the ioResult field is an idiosyncrasy of the Open call
 	pb->ioResult = DriverStart(dce->dCtlRefNum);
+	if (pb->ioResult != noErr) {
+		Cleanup();
+	}
 }
 
 int cClose(AuxDCE *dce) {
 	int err = DriverStop();
 	if (err == noErr) {
+		Cleanup();
 		DisposeHandle(dce->dCtlStorage); // delete global variable storage, must be the last thing
 		dce->dCtlStorage = NULL;
 	}

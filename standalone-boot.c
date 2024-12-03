@@ -1,6 +1,7 @@
 /* Copyright (c) 2023 Elliot Nunn */
 /* Licensed under the MIT license */
 
+#include <Devices.h>
 #include <Slots.h>
 #include <ROMDefs.h>
 #include <Traps.h>
@@ -28,6 +29,12 @@ void exec(struct SEBlock *pb) {
 	};
 
 	OSErr err = PBHOpenSync((void *)&spb);
+
+	// Close/open a few times to test our mettle
+	// for (int i=0; i<10; i++) {
+	// 	PBCloseSync((void *)&(struct IOParam){.ioRefNum=spb.ioSRefNum});
+	// 	err = PBHOpenSync((void *)&spb);
+	// }
 
 	pb->seRefNum = spb.ioSRefNum;
 	pb->seStatus = err;

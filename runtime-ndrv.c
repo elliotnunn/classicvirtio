@@ -6,6 +6,7 @@
 
 #include <DriverServices.h>
 
+#include "cleanup.h"
 
 #include "runtime.h"
 
@@ -13,6 +14,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID, IOCommandContents
     int err = paramErr;
     if (code==kInitializeCommand || code==kReplaceCommand) {
         err = DriverStart(pb.initialInfo->refNum);
+        if (err != noErr) {
+            Cleanup();
+        }
     } else if (code==kReadCommand) {
         err = DriverRead(&pb.pb->ioParam);
     } else if (code==kWriteCommand) {
@@ -23,6 +27,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID, IOCommandContents
         err = DriverStatus(&pb.pb->cntrlParam);
     } else if (code==kFinalizeCommand || code==kSupersededCommand) {
         err = DriverStop();
+        if (err == noErr) {
+            Cleanup();
+        }
     } else if (code==kOpenCommand || code==kCloseCommand) {
         err = noErr; // ignore these
     }

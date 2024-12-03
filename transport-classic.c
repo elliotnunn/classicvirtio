@@ -9,6 +9,7 @@
 #include <Slots.h>
 
 #include "callin68k.h"
+#include "cleanup.h"
 #include "device.h"
 #include "panic.h"
 #include "structs-mmio.h"
@@ -26,6 +27,7 @@ struct goldfishPIC {
 
 static long interrupt(void);
 static long interruptCompleteStub(void);
+static void cleanupIntHandler(void *handler);
 static void whoami(short refNum);
 
 // Globals declared in transport.h, define here
@@ -56,13 +58,12 @@ bool VInit(short refNum) {
 	VConfig = (void *)&device->config;
 
 	// 1. Reset the device.
-	device->status = 0;
-	SynchronizeIO();
-	while (device->status) {} // wait till 0
+	VReset();
 
 	// 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
 	device->status = 1;
 	SynchronizeIO();
+	RegisterCleanup(VReset);
 
 	// 3. Set the DRIVER status bit: the guest OS knows how to drive the device.
 	device->status = 1 | 2;
@@ -76,7 +77,10 @@ bool VInit(short refNum) {
 	VSetFeature(32, true);
 
 	if (SIntInstall(&slotInterrupt, slot)) return false;
+	RegisterCleanupVoidPtr(cleanupIntHandler, &slotInterrupt);
 	if (SIntInstall(&slotInterruptBackstop, slot)) return false;
+	RegisterCleanupVoidPtr(cleanupIntHandler, &slotInterruptBackstop);
+	RegisterCleanup(VReset); // a spurious interrupt will bomb
 
 	pic->enable = 0xffffffff; // enable all sources, don't discriminate
 	SynchronizeIO();
@@ -120,9 +124,18 @@ void VDriverOK(void) {
 }
 
 void VFail(void) {
+	if (device != NULL) {
+		SynchronizeIO();
+		device->status = 0x80;
+		SynchronizeIO();
+	}
+}
+
+void VReset(void) {
 	SynchronizeIO();
-	device->status = 0x80;
+	device->status = 0;
 	SynchronizeIO();
+	while (device->status) {} // wait till 0
 }
 
 // Tell the device where to find the three (split) virtqueue rings
@@ -179,6 +192,10 @@ static long interrupt(void) {
 // from interrupt, but we got occasional dsBadSlotInt crashes.
 static long interruptCompleteStub(void) {
 	return 1; // "did handle"
+}
+
+static void cleanupIntHandler(void *handler) {
+	SIntRemove(handler, slot);
 }
 
 // This driver has been started by the system to drive a numbered sResource (128-254) of a numbered slot.
