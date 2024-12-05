@@ -490,7 +490,9 @@ int DriverStatus(CntrlParam *pb) {
 	if (LogEnable) printf("%s", PBPrint(pb, pb->ioTrap|0xa000, 1));
 
 	int err = statusErr;
-	if (pb->csCode == kDriverGestaltCode) {
+	if (pb->csCode == kDriveStatus) {
+		err = sDriveStatus(pb);
+	} else if (pb->csCode == kDriverGestaltCode) {
 		DriverGestaltParam *gpb = (DriverGestaltParam *)pb;
 		if (gpb->driverGestaltSelector == 'nmrg') {
 			err = dgNameRegistryEntry(gpb);
