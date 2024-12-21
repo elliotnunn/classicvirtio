@@ -13,6 +13,7 @@ A minimal 68k test application:
 
 #include <ShutDown.h>
 
+#include "../extralowmem.h"
 #include "scratch.h"
 #include "tap.h"
 #include "traptest.h"
@@ -26,9 +27,7 @@ void testWrite(void);
 static void shutDownIfOnlyApp(void) {
 	fflush(stdout);
 	fclose(stdout);
-	const char *finder = (const char *)0x2e0;
-	const char *me = (const char *)0x910;
-	if (!memcmp(finder, me, finder[0]+1)) {
+	if (!memcmp(XLMGetFinderName(), XLMGetCurApName(), XLMGetCurApName()[0]+1)) {
 		ShutDwnPower();
 	}
 }

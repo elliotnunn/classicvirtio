@@ -23,6 +23,7 @@
 #include "catalog.h"
 #include "cleanup.h"
 #include "device.h"
+#include "extralowmem.h"
 #include "fids.h"
 #include "log.h"
 #include "multifork.h"
@@ -43,8 +44,6 @@
 #define c2pstr(p, c) {uint8_t l=strlen(c); p[0]=l; memcpy(p+1, c, l);}
 #define p2cstr(c, p) {uint8_t l=p[0]; memcpy(c, p+1, l); c[l]=0;}
 #define pstrcpy(d, s) memcpy(d, s, 1+(unsigned char)s[0])
-
-#define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1))
 
 enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
@@ -298,8 +297,8 @@ static void installExtFS(void) {
 	// Difficult to decide whether another device driver already installed the patch.
 	// (A Gestalt selector was used but System 7 likes to swallow these at startup.)
 	// First, does ToExtFS obviously point to our patch?
-	if (*(char **)0x3f2 != (char *)-1) {
-		if (!memcmp(*(char **)0x3f2, "\x60\x04\x39\x50\x46\x53", 6)) {
+	if ((uintptr_t)LMGetToExtFS() != -1) {
+		if (!memcmp(LMGetToExtFS(), "\x60\x04\x39\x50\x46\x53", 6)) {
 			printf("ToExtFS already patched\n");
 			return;
 		}
@@ -475,9 +474,8 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
 	if (GetVCBQHdr()->qHead == NULL) {
-		*(short *)0x352 = (long)&vcb >> 16; // DefVCBPtr
-		*(short *)0x354 = (long)&vcb;
-		*(short *)0x384 = vcb.vcbVRefNum; // DefVRefNum
+		LMSetDefVCBPtr((Ptr)&vcb);
+		XLMSetDefVRefNum(vcb.vcbVRefNum);
 
 		memcpy(findWD(0),
 			&(struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID = 2},
@@ -499,19 +497,18 @@ static OSErr fsUnmountVol(struct IOParam *pb) {
 	UnivCloseAll();
 
 	// Close any WDs that pointed to me.
-	short tablesize = *(short *)unaligned32(0x372);
+	short tablesize = *(short *)XLMGetWDCBsPtr();
 	for (short ref=WDLO+2; ref<WDLO+tablesize; ref+=16) {
 		struct WDCBRec *rec = findWD(pb->ioVRefNum);
-		if (unaligned32(rec->wdVCBPtr) == (uint32_t)&vcb) {
+		if (rec->wdVCBPtr == &vcb) {
 			memset(rec, 0, sizeof *rec);
 		}
 	}
 
 	// Was I the default volume? No longer.
-	if ((void *)LMGetDefVCBPtr() == (void *)&vcb) {
-		*(short *)0x352 = 0;
-		*(short *)0x354 = 0;
-		*(short *)0x384 = 0;
+	if ((struct VCB *)LMGetDefVCBPtr() == &vcb) {
+		LMSetDefVCBPtr(NULL);
+		XLMSetDefVRefNum(0);
 	}
 
 	DisposeHandle(vparms.vMLocalHand);
@@ -774,10 +771,6 @@ static OSErr fsSetFileInfo(struct HFileInfo *pb) {
 }
 
 static OSErr fsSetVol(struct HFileParam *pb) {
-	struct VCB *setDefVCBPtr;
-	short setDefVRefNum;
-	struct WDCBRec setDefWDCB;
-
 	if (pb->ioTrap & 0x200) {
 		// HSetVol: any directory is fair game,
 		// so check that the path exists and is really a directory
@@ -786,37 +779,23 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 		if (!IsDir(cnid)) return dirNFErr;
 		Clunk9(FID1);
 
-		setDefVCBPtr = &vcb;
-		setDefVRefNum = vcb.vcbVRefNum;
-		setDefWDCB = (struct WDCBRec){
-			.wdVCBPtr=&vcb,
-			.wdDirID=cnid
-		};
+		LMSetDefVCBPtr((Ptr)&vcb);
+		XLMSetDefVRefNum(vcb.vcbVRefNum);
+		memcpy(findWD(0), &(struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=cnid}, sizeof (struct WDCBRec));
 	} else {
 		// SetVol: only the root or a Working Directory is possible,
 		// and in either case the directory is known already to exist
 		if (pb->ioVRefNum <= WDHI) { // Working Directory
-			setDefVCBPtr = &vcb;
-			setDefVRefNum = pb->ioVRefNum;
-			setDefWDCB = (struct WDCBRec){
-				.wdVCBPtr=&vcb,
-				.wdDirID=findWD(pb->ioVRefNum)->wdDirID
-			};
+			LMSetDefVCBPtr((Ptr)&vcb);
+			XLMSetDefVRefNum(pb->ioVRefNum);
+			memcpy(findWD(0), &(struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=findWD(pb->ioVRefNum)->wdDirID}, sizeof (struct WDCBRec));
 		} else { // Root (via path, volume number or drive number)
-			setDefVCBPtr = &vcb;
-			setDefVRefNum = vcb.vcbVRefNum;
-			setDefWDCB = (struct WDCBRec){
-				.wdVCBPtr=&vcb,
-				.wdDirID=2
-			};
+			LMSetDefVCBPtr((Ptr)&vcb);
+			XLMSetDefVRefNum(vcb.vcbVRefNum);
+			memcpy(findWD(0), &(struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=2}, sizeof (struct WDCBRec));
 		}
 	}
 
-	// Set super secret globals
-	*(short *)0x352 = (long)setDefVCBPtr >> 16;
-	*(short *)0x354 = (long)setDefVCBPtr;
-	*(short *)0x384 = setDefVRefNum;
-	memcpy(findWD(0), &setDefWDCB, sizeof setDefWDCB);
 	return noErr;
 }
 
@@ -955,7 +934,7 @@ static OSErr fsClose(struct IOParam *pb) {
 static OSErr fsRead(struct IOParam *pb) {
 	// Reads to ROM are get discarded
 	char scratch[512];
-	bool usescratch = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
+	bool usescratch = pb->ioBuffer >= LMGetROMBase();
 
 	pb->ioActCount = 0;
 
@@ -1044,7 +1023,7 @@ static OSErr fsRead(struct IOParam *pb) {
 static OSErr fsWrite(struct IOParam *pb) {
 	// Writes from ROM are not supported by the 9P layer (fix this!)
 	char scratch[512];
-	bool usescratch = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
+	bool usescratch = pb->ioBuffer >= LMGetROMBase();
 
 	pb->ioActCount = 0;
 
@@ -1283,7 +1262,7 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 		.wdProcID = pb->ioWDProcID,
 	};
 
-	short tablesize = *(short *)unaligned32(0x372); // int at start of table
+	short tablesize = *(short *)XLMGetWDCBsPtr(); // int at start of table
 	enum {SKIPWD = 2 + 2 * sizeof (struct WDCBRec)}; // never use 1st/2nd WDCB
 
 	// Search for already-open WDCB
@@ -1365,7 +1344,7 @@ static int32_t pbDirID(void *_pb) {
 // A refnum of zero refers to the "current directory" WDCB
 // Sadly the blocks are *always* non-4-byte-aligned
 static struct WDCBRec *findWD(short refnum) {
-	void *table = (void *)unaligned32(0x372);
+	void *table = XLMGetWDCBsPtr();
 
 	int16_t tblSize = *(int16_t *)table;
 	int16_t offset = refnum ? refnum-WDLO : 2;

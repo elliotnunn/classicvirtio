@@ -9,21 +9,25 @@
 //   9.0-9.2 available and NECESSARY
 // Details in TN1184 "FCBs, Now and Forever"
 
+#define ENABLE_FCB_ARRAY_ACCESS 1
 #include <FSM.h>
+#include <LowMem.h>
+#include <Patches.h>
+#include <Traps.h>
 #if GENERATINGCFM
 #include <MixedMode.h>
 #else
-#define CallUniversalProc(a, ...) 0
+#define CallUniversalProc(a, ...) (long)a // nonsense define
 #endif
 #include <stdbool.h>
 #include <string.h>
 
+#include "extralowmem.h"
 #include "panic.h"
 
 #include "universalfcb.h"
 
 static int os9Format(void);
-static void *fcbBase(void);
 static bool refNumValid(short refNum);
 unsigned int hash(uint32_t cnid, bool resfork);
 
@@ -34,7 +38,7 @@ struct MyFCB *UnivAllocateFile(void) {
 		short refNum;
 		struct MyFCB *fcb;
 		// pascal OSErr UTAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
-		short err = CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xfe8, 0, &refNum, &fcb);
+		short err = CallUniversalProc(GetToolTrapAddress(_HFSUtilDispatch), 0xfe8, 0, &refNum, &fcb);
 		if (err) {
 			return NULL;
 		} else {
@@ -43,7 +47,7 @@ struct MyFCB *UnivAllocateFile(void) {
 			return fcb;
 		}
 	} else {
-		void *base = fcbBase();
+		void *base = XLMGetFCBSPtr();
 		short len = *(short *)base;
 		for (short refNum=2; refNum<len; refNum+=94) {
 			struct MyFCB *fcb = base + refNum;
@@ -100,13 +104,13 @@ struct MyFCB *UnivGetFCB(short refNum) {
 	if (os9Format()) {
 		struct MyFCB *fcb;
 		// pascal OSErr UTResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
-		CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xee8, 5, refNum, &fcb);
+		CallUniversalProc(GetToolTrapAddress(_HFSUtilDispatch), 0xee8, 5, refNum, &fcb);
 		return fcb;
 	} else {
 		if (!refNumValid(refNum)) {
 			return NULL;
 		}
-		return fcbBase() + refNum;
+		return (struct MyFCB *)(XLMGetFCBSPtr() + refNum);
 	}
 }
 
@@ -181,7 +185,7 @@ void UnivCloseAll(void) {
 // This can change at early boot, and is cheap to determine anyhow.
 static int os9Format(void) {
 #if GENERATINGCFM
-	short fcbLen = *(short *)0x3f6;
+	short fcbLen = XLMGetFSFCBLen();
 	return fcbLen > 0 && fcbLen != 94;
 #else
 	return 0;
@@ -189,17 +193,10 @@ static int os9Format(void) {
 }
 
 // only use if !os9Format()
-static void *fcbBase(void) {
-	unsigned short hi = *(unsigned short *)0x34e;
-	unsigned short lo = *(unsigned short *)0x350;
-	return (void *)(((unsigned long)hi << 16) | lo);
-}
-
-// only use if !os9Format()
 static bool refNumValid(short refNum) {
 	return refNum >= 2 &&
-		refNum < *(short *)fcbBase() &&
-		(refNum % *(short *)0x3f6) == 2;
+		refNum < *(short *)XLMGetFCBSPtr() &&
+		(refNum % XLMGetFSFCBLen()) == 2;
 }
 
 // Which bucket (i.e. linked list)

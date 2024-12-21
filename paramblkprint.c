@@ -106,7 +106,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 			{
 				unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
 				SPRINTF("%08x", (uintptr_t)pstring);
-				if (pstring /*&& (uintptr_t)pstring<*(uintptr_t *)0x39c*/) // check MemTop!
+				if (pstring) // check MemTop!
 					SPRINTF(" \"%.*s\"", pstring[0], pstring+1);
 			}
 			break;

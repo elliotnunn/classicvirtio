@@ -203,9 +203,7 @@ int DriverStart(short refNum) {
 	installDrive();
 	RegisterCleanup(removeDrive);
 
-	if (*(char *)0x14a >= 0) { // check whether Event Mgr is actually up
-		PostEvent(diskEvt, dqe.dQDrive);
-	}
+	PostEvent(diskEvt, dqe.dQDrive); // might be worth re-posting with accRun
 
 	printf("Ready\n");
 	return noErr;

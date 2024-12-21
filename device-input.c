@@ -4,11 +4,14 @@
 #include <Devices.h>
 #include <DriverServices.h>
 #include <Events.h>
+#include <LowMem.h>
 #include <MixedMode.h>
+#include <Quickdraw.h>
 #include <Types.h>
 
 #include "allocator.h"
 #include "callout68k.h"
+#include "extralowmem.h"
 #include "printf.h"
 #include "panic.h"
 #include "transport.h"
@@ -158,21 +161,19 @@ static void handleEvent(struct event e) {
 	} else if (e.type == EV_SYN) {
 		if (knowpos) {
 			// Scale to screen size (in lowmem globals)
-			unsigned long realx = x * *(int16_t *)0xc20 / 0x8000 + 1;
-			unsigned long realy = y * *(int16_t *)0xc22 / 0x8000 + 1;
+			unsigned long realx = x * XLMGetRowBits() / 0x8000 + 1;
+			unsigned long realy = y * XLMGetColLines() / 0x8000 + 1;
 
-			unsigned long point = (realy << 16) | realx;
+			LMSetMouseTemp((Point){realy, realx});
+			LMSetRawMouseLocation((Point){realy, realx});
 
-			*(unsigned long *)0x828 = point; // MTemp
-			*(unsigned long *)0x82c = point; // RawMouse
-
-			*(char *)0x8ce = *(char *)0x8cf; // CrsrNew = CrsrCouple
+			LMSetCursorNew(XLMGetCrsrCouple());
 
 			// Call JCrsrTask to redraw the cursor immediately.
 			// Feels much more responsive than waiting for another interrupt.
 			// Could a race condition garble the cursor? Haven't seen it happen.
 			// if (*(char *)(0x174 + 7) & 1) // Uncomment to switch on shift key
-			CALL0(void, *(void **)0x8ee);
+			CALL0(void, XLMGetJCrsrTask());
 		}
 
 		knowpos = false;
@@ -180,7 +181,7 @@ static void handleEvent(struct event e) {
 		newbtn = (newbtn & knowmask) | (oldbtn & ~knowmask);
 
 		if ((oldbtn != 0) != (newbtn != 0)) {
-			*(unsigned char *)0x172 = newbtn ? 0 : 0x80;
+			LMSetMouseButtonState(newbtn ? 0 : 0x80);
 
 			EvQEl *osevent;
 			PPostEvent(newbtn ? mouseDown : mouseUp, 0, &osevent);
