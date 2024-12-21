@@ -56,7 +56,6 @@ static int whichSlot(int bucket, uint32_t cnid);
 static char *slotName(int bucket, int slot);
 static void deleteSlotName(int bucket, int slot);
 static bool ciEqual(const char *a, const char *b);
-static void catalogDump(int b);
 
 static struct bucket cache[BUCKETS];
 static struct Qid9 rootQID;
@@ -71,6 +70,28 @@ void CatalogInit(struct Qid9 root) {
 		panic("failed walk /catalog");
 
 	rootQID = root;
+}
+
+// Only dumps the RAM part of the catalog
+void CatalogDump(void) {
+	for (int bucket=0; bucket<BUCKETS; bucket++) {
+		printf("% 3d: ", bucket);
+		for (int i=0; i<cache[bucket].usedBytes; i++) {
+			if (cache[bucket].names[i] == 0) {
+				printf(".");
+			} else {
+				printf("%c", cache[bucket].names[i]);
+			}
+		}
+		printf("\n");
+		for (int slot=0; slot<cache[bucket].usedSlots; slot++) {
+			printf("    %08x: (p=%08x, n=\"%s\", dirty=%d)\n",
+				cache[bucket].slots[slot].cnid,
+				cache[bucket].slots[slot].parent,
+				cache[bucket].names + cache[bucket].slots[slot].offset,
+				cache[bucket].slots[slot].dirty);
+		}
+	}
 }
 
 // The CNID arg must be a directory, unless an absolute path causes it to be ignored.
@@ -459,27 +480,5 @@ static bool ciEqual(const char *a, const char *b) {
 		if (ac == 0) return true;
 		a++;
 		b++;
-	}
-}
-
-static void catalogDump(int b) {
-	for (int bucket=0; bucket<BUCKETS; bucket++) {
-		if (b>=0 && b!=bucket) continue;
-		printf("% 3d: ", bucket);
-		for (int i=0; i<cache[bucket].usedBytes; i++) {
-			if (cache[bucket].names[i] == 0) {
-				printf(".");
-			} else {
-				printf("%c", cache[bucket].names[i]);
-			}
-		}
-		printf("\n");
-		for (int slot=0; slot<cache[bucket].usedSlots; slot++) {
-			printf("    %08x: (p=%08x, n=\"%s\", dirty=%d)\n",
-				cache[bucket].slots[slot].cnid,
-				cache[bucket].slots[slot].parent,
-				cache[bucket].names + cache[bucket].slots[slot].offset,
-				cache[bucket].slots[slot].dirty);
-		}
 	}
 }

@@ -12,6 +12,7 @@ const char *PosModeName(char mode) {
 	case 1: return "fsFromStart";
 	case 2: return "fsFromLEOF";
 	case 3: return "fsFromMark";
+	default: return "unknown";
 	}
 }
 

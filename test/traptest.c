@@ -16,7 +16,6 @@
 #include "traptest.h"
 
 static int trap(void *pb, uint16_t trap, uint16_t selector);
-static int cpstrcmp(const char *c, const char *p);
 static void printpb(void *pb, const char *prefix);
 
 enum {
@@ -159,7 +158,7 @@ static void printpb(void *pb, const char *prefix) {
 // TrapTest(_GetVol, ioNamePtr, "something", NULL, ioResult, 0, NULL); // need to extend for return values
 void TrapTest(uint32_t trapnum, ...) {
 	char pb[128] __attribute__((aligned(4))) = {};
-	char strings[1024];
+	unsigned char strings[1024];
 	int strbytes = 0;
 
 	// Populate parameter block
@@ -183,7 +182,7 @@ void TrapTest(uint32_t trapnum, ...) {
 			} else {
 				setto = va_arg(va, long);
 			}
-			rep += sprintf(rep, "=%d", setto);
+			rep += sprintf(rep, "=%ld", setto);
 		} else if (f.special == STRING) {
 			char *s = va_arg(va, char *);
 			c2pstrcpy(strings+strbytes, s);
@@ -208,9 +207,9 @@ void TrapTest(uint32_t trapnum, ...) {
 	rep = stpcpy(rep, ") = (");
 
 	// Call the trap synchronously
-	// printpb(pb, "#  -> ");
+	if (0) printpb(pb, "#  -> ");
 	trap(pb, (uint16_t)(trapnum>>16), (uint16_t)trapnum);
-	// printpb(pb, "# <-  ");
+	if (0) printpb(pb, "# <-  ");
 
 	// Check the parameter block against expected values
 	char complaints[1024] = "";
@@ -240,8 +239,8 @@ void TrapTest(uint32_t trapnum, ...) {
 			} else {
 				want = va_arg(va, long);
 			}
-			rep += sprintf(rep, "=%d", want);
-			com += sprintf(com, "=%d", got);
+			rep += sprintf(rep, "=%ld", want);
+			com += sprintf(com, "=%ld", got);
 			bad += (got != want);
 		} else if (f.special == ERR) {
 			int32_t want = va_arg(va, int);

@@ -22,7 +22,7 @@
 	  (uint32_t)(255 & (S)[3]))
 
 static char *lutget(char *dest, const char *lut, char letter);
-static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, uint8_t *name);
+static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, char *name);
 static void derezFullLine(char *dest, char *src);
 
 // Escape code lookup table for quoted strings
@@ -86,7 +86,7 @@ void DeRez(uint32_t forkfid, uint32_t textfid) {
 
 			int16_t id = READ16BE(r);
 			uint16_t nameoff = READ16BE(r+2);
-			uint8_t *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
+			char *name = (nameoff==0xffff) ? NULL : (nl+nameoff);
 			uint8_t attr = *(r+4);
 			uint32_t contoff = READ24BE(r+5);
 
@@ -140,7 +140,7 @@ static char *lutget(char *dest, const char *lut, char letter) {
 	return dest;
 }
 
-static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, uint8_t *name) {
+static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, char *name) {
 	p = WBuffer(p, 2048);
 	p = stpcpy(p, "data '");
 
@@ -153,7 +153,7 @@ static char *derezHeader(char *p, uint8_t attrib, char *type, int16_t id, uint8_
 
 	if (name) {
 		p = stpcpy(p, ", \"");
-		for (uint8_t i=0; i<name[0]; i++) {
+		for (int i=0; i<(255&name[0]); i++) {
 			p = lutget(p, lut, name[i+1]);
 			if (p[-1] == '"') p = stpcpy(p-1, "\\\""); // escape double quote
 		}

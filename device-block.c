@@ -98,8 +98,6 @@ static OSErr dgBoot(struct DriverGestaltParam *pb);
 static OSErr dgDeviceReference(struct DriverGestaltParam *pb);
 static OSErr dgInterface(struct DriverGestaltParam *pb);
 static OSErr dgDeviceType(struct DriverGestaltParam *pb);
-static OSErr controlStatusCall(struct CntrlParam *pb);
-static OSErr controlStatusDispatch(long selector, void *pb);
 
 enum {
 	MAXBUFFERS = 16,
@@ -143,7 +141,7 @@ DriverDescription TheDriverDescription = {
 // Remember that this only needs to allow/deny the request, cleanup.c handles the rest
 int DriverStop(void) {
 	// Search the volume queue for a mounted+online volume pointing to us
-	for (VCB *vcb=GetVCBQHdr()->qHead; vcb!=NULL&&vcb!=(VCB *)-1; vcb=(VCB *)vcb->qLink) {
+	for (VCB *vcb=(VCB *)GetVCBQHdr()->qHead; vcb!=NULL&&vcb!=(VCB *)-1; vcb=(VCB *)vcb->qLink) {
 		if (vcb->vcbDrvNum == dqe.dQDrive) {
 			printf("Refusing to stop while volume is mounted\n");
 			return closErr;
@@ -217,7 +215,7 @@ int DriverRead(IOParam *pb) {
 	int err = noErr;
 
 	// First element is a logical buffer, subsequent ones are the result of GetPhysical
-	MemoryBlock memblocks[1+MAXBUFFERS] = {pb->ioBuffer, pb->ioReqCount};
+	MemoryBlock memblocks[1+MAXBUFFERS] = {{pb->ioBuffer, pb->ioReqCount}};
 	LockMemory(pb->ioBuffer, pb->ioReqCount); // already held by VM
 	pb->ioActCount = 0;
 	fixedbuf->request.type = 0;
@@ -227,7 +225,11 @@ int DriverRead(IOParam *pb) {
 		fixedbuf->request.sector = firstblock + (pb->ioPosOffset+pb->ioActCount)/512;
 
 		unsigned long n = buffers - 2; // two buffers reserved for request (16b) and status (1b)
-		GetPhysical((LogicalToPhysicalTable *)memblocks, &n); // how many physical extents were actually needed?
+		if (0) { // enable for a stress test
+			stressfulGetPhysical((LogicalToPhysicalTable *)memblocks, &n);
+		} else {
+			GetPhysical((LogicalToPhysicalTable *)memblocks, &n); // how many physical extents were actually needed?
+		}
 		uint32_t phys[MAXBUFFERS] = {pfixedbuf + offsetof(struct fixedbuf, request)};
 		uint32_t size[MAXBUFFERS] = {sizeof fixedbuf->request};
 		for (int i=1; i<=n; i++) {
@@ -265,7 +267,7 @@ static void installDrive(void) {
 }
 
 static void removeDrive(void) {
-	int err = Dequeue((DrvQEl *)&dqe.qLink, GetDrvQHdr());
+	int err = Dequeue((QElem *)&dqe.qLink, GetDrvQHdr());
 	printf("the dequeue call returned %d\n", err);
 }
 
@@ -334,11 +336,11 @@ void probePartitions(uint32_t *firstblock, uint32_t *numblocks) {
 
 	struct Partition part;
 	int index = 0;
-	struct Partition chosen;
+	struct Partition chosen = {};
 	do {
 		memcpy(&part, readSector(blk0.sbBlkSize / 512 * ++index), sizeof part);
 		printf("Partition #%d type=%-24s name=%s", index, part.pmParType, part.pmPartName);
-		if (!strcmp(part.pmParType, "Apple_HFS")) {
+		if (!strcmp((const char *)part.pmParType, "Apple_HFS")) {
 			printf("  *selected*");
 			chosen = part;
 		}
@@ -365,22 +367,23 @@ static OSErr cIcon(struct CntrlParam *pb) {
 
 	// B&W HD icon, Sys 8+ converts to colour version
 	static struct about hd = {
-		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Icon
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x7ffffffe, 0x80000001,
-		0x80000001, 0x80000001, 0x80000001, 0x80000001,
-		0x80000001, 0x88000001, 0x80000001, 0x80000001,
-		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Mask
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x00000000, 0x00000000,
-		0x00000000, 0x00000000, 0x7ffffffe, 0xffffffff,
-		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
-		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
-		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
+		{
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, // Icon
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x7ffffffe, 0x80000001,
+			0x80000001, 0x80000001, 0x80000001, 0x80000001,
+			0x80000001, 0x88000001, 0x80000001, 0x80000001,
+			0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, // Mask
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x7ffffffe, 0xffffffff,
+			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+			0x7ffffffe, 0x00000000, 0x00000000, 0x00000000},
 		"\x13" "Virtio block device"
 	};
 

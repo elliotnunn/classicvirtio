@@ -97,7 +97,6 @@ static const uint16_t hexlutLS[256] = {
 };
 
 uint32_t Rez(uint32_t textfid, uint32_t forkfid) {
-	int err;
 	int nres = 0;
 	struct res resources[2727]; // see Guide to the File System Manager v1.2 pD-3
 	char namelist[0x8000];
@@ -284,8 +283,8 @@ static long rezHeader(uint8_t *attrib, uint32_t *type, int16_t *id, bool *hasnam
 namedone:
 	if (*recv != '$') goto constants;
 	recv++;
-	uint16_t hex = hexlutMS[*recv++];
-	hex |= hexlutLS[*recv++];
+	uint16_t hex = hexlutMS[255 & *recv++];
+	hex |= hexlutLS[255 & *recv++];
 	if (hex & 0x8000) return 'Hbd$';
 	*attrib = hex;
 	STRIPWS();
@@ -329,11 +328,11 @@ static int rezBody(void) {
 	char *recv = RBuffer(NULL, 1024);
 	char *send = WBuffer(NULL, 512);
 
-	while (whitespace[255 & *recv++]); recv--;
+	while (whitespace[255 & *recv]) recv++;
 	if (*recv++ != '{') return -1001;
 
 	stem:
-	while (whitespace[255 & *recv++]); recv--;
+	while (whitespace[255 & *recv]) recv++;
 	switch (*recv++) {
 	case '/':
 		goto comment;
@@ -362,7 +361,7 @@ static int rezBody(void) {
 	hex:
 	while ((digit1 = *recv++) == ' ') {}
 	digit2 = *recv++;
-	int16_t val = hexlutMS[digit1] | hexlutLS[digit2];
+	int16_t val = hexlutMS[255 & digit1] | hexlutLS[255 & digit2];
 	if (val < 0) {
 		recv -= 2; // those weren't paired hex digits
 		if (*recv++ != '"') {
@@ -424,8 +423,8 @@ static long quote(char *dest, char **src, char mark, int min, int max) {
 			ch = 127;
 		} else if (ch == '0') {
 			if (*s++ != 'x') return 'esc\0' | mark;
-			uint16_t hex = hexlutMS[*s++];
-			hex |= hexlutMS[*s++];
+			uint16_t hex = hexlutMS[255 & *s++];
+			hex |= hexlutMS[255 & *s++];
 			if (hex & 0x8000) return 'hex\0' | mark;
 			ch = hex;
 		}

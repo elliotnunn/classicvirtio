@@ -327,8 +327,6 @@ struct MFImpl MF3 = {
 
 // This function is idempotent. It brings the cached resource fork up to date and stats it.
 static void statResourceFork(int32_t cnid, uint32_t parentfid, const char *name, struct Stat9 *stat) {
-	int err;
-
 	// printf("statResourceFork cnid=%08x parentfid=%d name=%s\n", cnid, parentfid, name);
 
 	// Delightfully quick case

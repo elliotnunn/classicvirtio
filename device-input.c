@@ -11,6 +11,7 @@
 
 #include "allocator.h"
 #include "callout68k.h"
+#include "cleanup.h"
 #include "extralowmem.h"
 #include "printf.h"
 #include "panic.h"

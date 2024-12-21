@@ -6,6 +6,7 @@
 #include "9p.h"
 
 void CatalogInit(struct Qid9 root);
+void CatalogDump(void);
 int32_t CatalogWalk(uint32_t fid, int32_t cnid, const unsigned char *paspath, int32_t *retparent, char *retname);
 void CatalogSet(int32_t cnid, int32_t pcnid, const char *name, bool nameDefinitive);
 int32_t CatalogGet(int32_t cnid, char *retname);

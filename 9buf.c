@@ -87,9 +87,9 @@ char *RBuffer(char *giveback, int32_t min) {
 	}
 
 	// Make an expensive Tread call
-	int32_t gotten;
+	uint32_t gotten; // Read9 insists on unsigned
 	Read9(rfid, getptr, getoffset, get, &gotten);
-	if (gotten < get) getptr[gotten] = 0; // null-term EOF
+	if (gotten != get) getptr[gotten] = 0; // null-term EOF
 
 	rbufat = rseek;
 	return rborrow = rbuf;

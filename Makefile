@@ -28,7 +28,7 @@ SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(SUPPORT))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(SUPPORT))
 
 # Settle a dispute between MacTypes.h and stdbool.h
-CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order
+CDEFS = -DTYPE_BOOL -Dbool=_Bool -Dtrue=1 -Dfalse=0 -Wno-scalar-storage-order -Wall
 
 # Uncomment this to generate a CPU time profile for the 9p driver
 # To view it, run "./9profile.sh | flamegraph.pl > fg.svg"

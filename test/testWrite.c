@@ -582,11 +582,11 @@ void testWrite(void) {
 			!strcmp(l->data, buf) &&
 			pb.ioResult == l->err;
 
-		TAPResult(ok, "Write(filesize=%d, initialpos=%d, mode=%s, delta=%d, writesize=%d) -> (data=\"%s\", finalpos=%d, err=%s)",
+		TAPResult(ok, "Write(filesize=%d, initialpos=%d, mode=%s, delta=%d, writesize=%d) -> (data=\"%s\", finalpos=%ld, err=%s)",
 			l->filesize, l->initialpos, PosModeName(l->mode), l->delta, l->writesize, l->data, l->finalpos, ErrName(l->err));
 
 		if (!ok) {
-			printf("# got (data=\"%s\", finalpos=%d, err=%s)\n", buf, finalpos, ErrName(pb.ioResult));
+			printf("# got (data=\"%s\", finalpos=%ld, err=%s)\n", buf, finalpos, ErrName(pb.ioResult));
 		}
 
 		FSClose(ref);

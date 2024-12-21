@@ -14,6 +14,7 @@ and has an easy output channel (a file).
 
 #include "9p.h"
 #include "callin68k.h"
+#include "panic.h"
 #include "printf.h"
 
 #include "profile.h"
@@ -44,7 +45,7 @@ void InitProfile(uint32_t fid) {
 	Write9(outfid, header, 0, sizeof header - 1, NULL);
 	outseek = sizeof header - 1;
 	makeFuncTable();
-	VInstall(&timer);
+	VInstall((QElem *)&timer);
 }
 
 // thanks to -finstrument-functions

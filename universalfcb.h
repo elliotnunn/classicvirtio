@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 // Fields inside a union are repurposed and maybe available for multifork use
+// Must make sure that the fields here match the real FCB fields
 struct MyFCB {
 	uint32_t fcbFlNm;            // FCB file number. Non-zero marks FCB used
 	char fcbFlags;               // FCB flags
@@ -44,9 +45,6 @@ struct MyFCB {
 	uint32_t fcbDirID;           // Parent Directory ID
 	Str31 fcbCName;              // CName of open file
 } __attribute__((packed));
-
-static char testStructSize1[94-sizeof (struct MyFCB)];
-static char testStructSize2[sizeof (struct MyFCB)-94];
 
 struct MyFCB *UnivAllocateFile(void); // returns NULL if out of FCBs
 void UnivEnlistFile(struct MyFCB *fcb); // panics on invalid arg

@@ -327,11 +327,11 @@ void testSetFPos(void) {
 		PBSetFPosSync((void *)&pb);
 
 		bool ok = pb.ioPosOffset==l->finalpos && pb.ioResult==l->err;
-		TAPResult(ok, "SetFPos(size=%d, initialpos=%d, mode=%s, delta=%d) -> (finalpos=%d, err=%s)",
+		TAPResult(ok, "SetFPos(size=%d, initialpos=%d, mode=%s, delta=%d) -> (finalpos=%ld, err=%s)",
 			l->size, l->initialpos, PosModeName(l->mode), l->delta, l->finalpos, ErrName(l->err));
 
 		if (!ok) {
-			printf("# got (finalpos=%d, err=%s)\n", (int)pb.ioPosOffset, ErrName(pb.ioResult));
+			printf("# got (finalpos=%ld, err=%s)\n", pb.ioPosOffset, ErrName(pb.ioResult));
 		}
 
 		thepos = 99;

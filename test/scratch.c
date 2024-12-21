@@ -127,6 +127,7 @@ long ScratchDirID(const char *name) {
 		}
 	}
 	TAPBailOut("no DirID available for \"%s\"", name);
+	return 0;
 }
 
 const char *ScratchNameOfDirID(long id) {
@@ -146,6 +147,7 @@ short ScratchWD(const char *name) {
 		}
 	}
 	TAPBailOut("no WDRefNum available for \"%s\"", name);
+	return 0;
 }
 
 const char *ScratchNameOfWD(short wd) {

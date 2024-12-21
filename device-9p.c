@@ -1606,7 +1606,7 @@ static OSErr cIcon(struct CntrlParam *pb) {
 	};
 
 	// B&W HD icon, Sys 8+ converts to colour version
-	static struct about hd = {
+	static struct about hd = {{
 		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Icon
 		0x00000000, 0x00000000, 0x00000000, 0x00000000,
 		0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -1622,11 +1622,11 @@ static OSErr cIcon(struct CntrlParam *pb) {
 		0x00000000, 0x00000000, 0x7ffffffe, 0xffffffff,
 		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
 		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
-		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
-		// dynamically create the "location" field, goes in the Get Info window
-	};
+		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000
+	}};
 
-	hd.location[0] = sprintf(hd.location + 1, "Virtio 9P device (%s)", MF.Name);
+	// dynamically create the "location" field, goes in the Get Info window
+	hd.location[0] = sprintf((char *)hd.location + 1, "Virtio 9P device (%s)", MF.Name);
 
 	static const void *ret = &hd;
 	memcpy(pb->csParam, &ret, sizeof ret);

@@ -28,7 +28,6 @@ static volatile struct virtio_pci_common_cfg *gCommonConfig;
 static uint16_t *gNotify;
 static uint32_t gNotifyMultiplier;
 static uint8_t *gISRStatus;
-static bool gSuppressNotification;
 static RegEntryID dev;
 
 // Internal routines

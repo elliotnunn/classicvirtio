@@ -13,5 +13,5 @@ void panic(const char *panicstr) {
 	char pstring[257];
 	strcpy(pstring+1, panicstr);
 	pstring[0] = strlen(pstring+1);
-	DebugStr(pstring);
+	DebugStr((unsigned char *)pstring);
 }

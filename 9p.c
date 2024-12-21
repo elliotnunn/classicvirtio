@@ -41,12 +41,12 @@ enum {
    (uint64_t)(255 & ((char *)S)[1]) << 010 | (uint64_t)(255 & ((char *)S)[0]) << 000)
 #define WRITE16LE(P, V)                        \
   (((char *)P)[0] = (0x000000FF & (V)), \
-   ((char *)P)[1] = (0x0000FF00 & (V)) >> 8, ((char *)P) + 2)
+   ((char *)P)[1] = (0x0000FF00 & (V)) >> 8)
 #define WRITE32LE(P, V)                        \
   (((char *)P)[0] = (0x000000FF & (V)), \
    ((char *)P)[1] = (0x0000FF00 & (V)) >> 8, \
    ((char *)P)[2] = (0x00FF0000 & (V)) >> 16, \
-   ((char *)P)[3] = (0xFF000000 & (V)) >> 24, ((char *)P) + 4)
+   ((char *)P)[3] = (0xFF000000 & (V)) >> 24)
 #define WRITE64LE(P, V)                        \
   (((char *)P)[0] = (0x00000000000000FF & (V)) >> 000, \
    ((char *)P)[1] = (0x000000000000FF00 & (V)) >> 010, \
@@ -55,13 +55,11 @@ enum {
    ((char *)P)[4] = (0x000000FF00000000 & (V)) >> 040, \
    ((char *)P)[5] = (0x0000FF0000000000 & (V)) >> 050, \
    ((char *)P)[6] = (0x00FF000000000000 & (V)) >> 060, \
-   ((char *)P)[7] = (0xFF00000000000000 & (V)) >> 070, ((char *)P) + 8)
+   ((char *)P)[7] = (0xFF00000000000000 & (V)) >> 070)
 
 uint32_t Max9;
 
 static uint32_t openfids;
-
-static void **physicals; // newptr allocated block
 
 int bufcnt;
 volatile int freebufs;
@@ -577,7 +575,7 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 		beenlocked |= (1<<i);
 
 		MemoryBlock mbs[256] = {logiranges[i]};
-		long extents = 255;
+		unsigned long extents = 255;
 
 		if (GetPhysical((void *)mbs, &extents) || extents >= 255) {
 			CLEANUP();

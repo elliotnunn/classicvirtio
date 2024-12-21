@@ -151,7 +151,6 @@ struct MyFCB *UnivNext(struct MyFCB *fcb) {
 		panic("UnivNext on unlisted FCB");
 	}
 
-	short search = lists[key];
 	for (;;) {
 		short search = fcb->right;
 		fcb = UnivMustGetFCB(search);
