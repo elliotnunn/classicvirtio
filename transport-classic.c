@@ -167,9 +167,10 @@ void VNotify(uint16_t queue) {
 }
 
 static long interrupt(void) {
-	// Ignore the Goldfish for now, just check the Virtio registers for an
-	// interrupt, and lower it if needed
+	// Deassert the interrupt at the Virtio device level
+	// (Don't poll the Goldfish)
 	uint32_t flags = device->interruptStatus;
+	if (flags) device->interruptACK = flags;
 
 	if (flags & 1) {
 		QNotified();
@@ -178,9 +179,6 @@ static long interrupt(void) {
 	if (flags & 2) {
 		DConfigChange();
 	}
-
-	SynchronizeIO();
-	if (flags) device->interruptACK = flags;
 
 	// We have lowered the interrupt for this Virtio device.
 	// Pretend we handled nothing, to continue down the handler chain.

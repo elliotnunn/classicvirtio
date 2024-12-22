@@ -100,6 +100,7 @@ asm (
 
 // First C function to be called at Driver Open
 // Creates the global data area by reading the ELF header -- so it cannot access globals yet!
+__attribute__((no_instrument_function))
 void *ramDataSegment(AuxDCE *dce) {
 	struct elf *elf = elfHeader();
 	#define PH0 ((struct phdr *)((char *)elf + elf->e_phoff))
@@ -152,6 +153,7 @@ void *ramDataSegment(AuxDCE *dce) {
 
 // Second C function to be called at Driver Open, with global variables now available
 // Do all the other stuff, and remember to set a result code in the Param Block
+__attribute__((no_instrument_function))
 void cOpen(FileParam *pb, AuxDCE *dce) {
 	DRVRHeader *drvr = *(DRVRHeader **)dce->dCtlDriver; // trust me, it's a handle
 	patchStubDriver(drvr);
@@ -163,6 +165,7 @@ void cOpen(FileParam *pb, AuxDCE *dce) {
 	}
 }
 
+__attribute__((no_instrument_function))
 int cClose(AuxDCE *dce) {
 	int err = DriverStop();
 	if (err == noErr) {
@@ -174,6 +177,7 @@ int cClose(AuxDCE *dce) {
 }
 
 // Scan backward in memory to find our own header: undefined behaviour in C so use asm.
+__attribute__((no_instrument_function))
 static struct elf *elfHeader(void) {
 	struct elf *ret;
 	asm volatile (
@@ -192,6 +196,7 @@ void asmPrime(void);
 void asmCtl(void);
 void asmStatus(void);
 void asmClose(void);
+__attribute__((no_instrument_function))
 static void patchStubDriver(DRVRHeader *drvr) {
 	// Hand-edit the DRVR header to jump to our four driver routines
 	int fields[] = {drvr->drvrPrime, drvr->drvrCtl, drvr->drvrStatus, drvr->drvrClose};

@@ -35,7 +35,7 @@ struct virtq {
 
 static void poll(uint16_t q);
 
-static struct virtq queues[MAX_VQ];
+static volatile struct virtq queues[MAX_VQ];
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
 	if (q >= MAX_VQ) return 0;

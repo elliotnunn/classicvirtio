@@ -31,6 +31,7 @@
 #include "panic.h"
 #include "paramblkprint.h"
 #include "patch68k.h"
+#include "profile.h"
 #include "9p.h"
 #include "transport.h"
 #include "unicode.h"

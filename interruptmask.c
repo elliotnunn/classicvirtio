@@ -75,6 +75,14 @@ void ReenableInterruptsAndWaitFor(short oldlevel, volatile unsigned long *flag) 
 	ReenableInterrupts(oldlevel);
 	while (*flag == 0) {}
 #else
+	// The editable code below makes this nonreentrant
+	static volatile bool alreadyEntered;
+	if (alreadyEntered) {
+		ReenableInterrupts(oldlevel);
+		while (*flag == 0) {}
+	}
+	alreadyEntered = true;
+
 	// Editable piece of machine code containing the STOP instruction:
 	// STOP takes an "immediate operand" but we need to call it
 	// with any SR value (various interrupt mask levels etc)
@@ -124,5 +132,6 @@ void ReenableInterruptsAndWaitFor(short oldlevel, volatile unsigned long *flag) 
 			break;
 		}
 	}
+	alreadyEntered = false;
 #endif
 }

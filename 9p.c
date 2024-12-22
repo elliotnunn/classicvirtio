@@ -503,7 +503,7 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 
 	WRITE32LE(t, ts + tbigsize); // size field
 	*(t+4) = cmd; // T-command number
-	WRITE16LE(t+5, 0); // zero is our only tag number (for now...)
+	WRITE16LE(t+5, bufcnt - freebufs); // approximates the depth of reentrancy
 
 // 	printf("> ");
 // 	for (int i=0; i<ts; i++) {
