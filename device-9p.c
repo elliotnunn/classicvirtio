@@ -1431,25 +1431,6 @@ static int32_t mactime(int64_t unixtime) {
 }
 
 static long fsCall(void *pb, long selector) {
-	// Hideously nasty stack-sniffing debug code
-// 	void *top = LMGetMemTop() - 32;
-// 	if (top > stack+512) top = stack+512;
-// 	while (stack < top) {
-// 		void *addr = *(void **)stack - 2;
-// 		void *memtop = LMGetMemTop();
-// 		void *romstart = LMGetROMBase();
-// 		void *romend = romstart + *(uint32_t *)(romstart + 64);
-//
-// 		if (((int)addr & 1) == 0 && (addr < memtop || (addr >= romstart && addr < romend))) {
-// 			if (*(uint16_t *)addr == *(uint16_t *)(pb + 6)) {
-// 				printf("caller seems to be %p\n", addr);
-// 				break;
-// 			}
-// 		}
-//
-// 		stack += 2;
-// 	}
-
 	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 
 	// Use the selector format of the File System Manager
