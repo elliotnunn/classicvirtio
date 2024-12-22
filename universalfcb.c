@@ -36,10 +36,10 @@ static short lists[256]; // each a linked list of FCBs
 struct MyFCB *UnivAllocateFile(void) {
 	if (os9Format()) {
 		short refNum;
-		struct MyFCB *fcb;
+		struct MyFCB *fcb = NULL;
 		// pascal OSErr UTAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
-		short err = CallUniversalProc(GetToolTrapAddress(_HFSUtilDispatch), 0xfe8, 0, &refNum, &fcb);
-		if (err) {
+		CallUniversalProc(GetToolTrapAddress(_HFSUtilDispatch), 0xfe8, 0, &refNum, &fcb);
+		if (fcb == NULL) {
 			return NULL;
 		} else {
 			memset(fcb, 0, 94); // ?UTGetForkControlBlockSize
@@ -102,7 +102,7 @@ void UnivDelistFile(struct MyFCB *fcb) {
 
 struct MyFCB *UnivGetFCB(short refNum) {
 	if (os9Format()) {
-		struct MyFCB *fcb;
+		struct MyFCB *fcb = NULL;
 		// pascal OSErr UTResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
 		CallUniversalProc(GetToolTrapAddress(_HFSUtilDispatch), 0xee8, 5, refNum, &fcb);
 		return fcb;
