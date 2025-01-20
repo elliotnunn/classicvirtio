@@ -9,6 +9,5 @@
 // UTF-8 is null-terminated, Roman is Pascal
 
 void mr31name(unsigned char *roman, const char *utf8);
-void mr27name(unsigned char *roman, const char *utf8);
 void utf8name(char *utf8, const unsigned char *roman);
 long utf8char(unsigned char roman);

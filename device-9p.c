@@ -73,6 +73,7 @@ static void installDrive(void);
 static void removeDrive(void);
 static void installExtFS(void);
 static void getBootBlocks(void);
+static void useMountTag(const void *conf, char *retname, char *retformat);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
 static void updateKnownLength(struct MyFCB *fcb, int32_t length);
@@ -229,22 +230,13 @@ int DriverStart(short refNum) {
 		panic("failed walk dotdir");
 	CatalogInit(rootQID);
 
-	// Read mount_tag from config space into a C string
-	// (Suffixed with :1 or :2 etc to force a specific multifork format)
-	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
-	if (nameLen > 127) nameLen = 127;
-	char name[MAXNAME] = {};
-	memcpy(name, VConfig+2, nameLen); // guarantee null term
-
-	char *formathint = "";
-	char *separator = strchr(name, '_');
-	if (separator != NULL) {
-		formathint = separator + 1;
-		*separator = 0; // terminate the disk name there
-	}
+	// Use the "mount_tag" config field as the volume name (ASCII only)
+	// optionally suffixed with "_3" to force a specific multifork format.
+	char name[28] = {}, format[100] = {};
+	useMountTag(VConfig, name, format);
 
 	printf("Volume name: %s\n", name);
-	mr27name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
+	mr31name(vcb.vcbVN, name); // convert to short Mac Roman pascal string
 	CatalogSet(2, 1, name, true/*definitive case*/);
 
 	// Need unique stable creation date, used pervasively as an ID, from inode#
@@ -254,8 +246,8 @@ int DriverStart(short refNum) {
 		((rootQID.path >> 60) & 0xf);
 
 	// Choose a multifork format by probing the fs contents
-	MFChoose(formathint);
-	printf("Fork format: %s\n", MF.Name);
+	MFChoose(format);
+	printf("Fork format: %s (hint was \"%s\")\n", MF.Name, format);
 	if (MF.Init()) return memFullErr;
 
 	int32_t systemFolder = CatalogWalk(FID1, 2 /*cnid*/, "\pSystem Folder", NULL, NULL);
@@ -456,6 +448,32 @@ static void getBootBlocks(void) {
 	}
 done:
 	// MF.Close(fcb); // might be worth keeping in cache?
+}
+
+static void useMountTag(const void *conf, char *retname, char *retformat) {
+	struct mount_tag {
+		uint16_t namelen;
+		const char name[];
+	} __attribute((scalar_storage_order("little-endian")));
+	const struct mount_tag *c = conf;
+
+	// Everything before the underscore is the name
+	strcpy(retname, "Macintosh HD"); // if there is no tag
+	for (int i=0; i<27 && i<c->namelen && c->name[i]!='_'; i++) {
+		retname[i] = c->name[i];
+		retname[i+1] = 0;
+	}
+
+	// Everything after the underscore is the format
+	for (int i=0; i<c->namelen; i++) {
+		if (c->name[i] == '_') {
+			for (int j=i+1; j<c->namelen; j++) {
+				*retformat++ = c->name[j];
+			}
+			break;
+		}
+	}
+	*retformat = 0;
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {

@@ -58,25 +58,6 @@ void mr31name(unsigned char *roman, const char *utf8) {
 	}
 }
 
-// Simpler rules and shorter limit for volume names
-void mr27name(unsigned char *roman, const char *utf8) {
-	const char *this = utf8;
-
-	roman[0] = 0;
-	while (roman[0] < 27) {
-		int ch = toMacRoman(&this); // increments this
-		if (ch < 0) {
-			roman[++(roman[0])] = '?';
-		} else if (ch == ':') {
-			roman[++(roman[0])] = '/';
-		} else if (ch == 0) {
-			break;
-		} else {
-			roman[++(roman[0])] = ch;
-		}
-	}
-}
-
 void utf8name(char *utf8, const unsigned char *roman) {
 	for (int i=0; i<roman[0]; i++) {
 		long bytes = utf8char(roman[i+1]);
