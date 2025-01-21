@@ -304,72 +304,44 @@ int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct 
 		retqid);
 }
 
-struct rdbuf {
-	uint32_t fid;
-	uint64_t nextRequest;
-	uint32_t size, recvd, used;
-	char data[];
-};
-
-#define RDBUFALIGN(voidptr) ((struct rdbuf *) \
-		(((uintptr_t)buf + alignof (struct rdbuf) - 1) & -alignof (struct rdbuf)))
-
-void InitReaddir9(uint32_t fid, void *buf, size_t bufsize) {
-	struct rdbuf *rdbuf = RDBUFALIGN(buf);
-
-	rdbuf->fid = fid;
-	rdbuf->nextRequest = 0;
-	rdbuf->size = (char *)buf + bufsize - rdbuf->data;
-	rdbuf->recvd = 0;
-	rdbuf->used = 0;
-}
-
-// 0 = ok, negative = eof, positive = linux errno
-int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[MAXNAME]) {
+int Readdir9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *retcount, void *retbuf) {
 	enum {Treaddir = 40}; // size[4] Treaddir tag[2] fid[4] offset[8] count[4]
 	enum {Rreaddir = 41}; // size[4] Rreaddir tag[2] count[4] data[count]
 	                      // "data" = qid[13] offset[8] type[1] name[s]
 
-	struct rdbuf *rdbuf = RDBUFALIGN(buf);
+	if (retcount) *retcount = 0;
+	return transact(Treaddir, "dqd", "dB",
+		fid, offset, count,
+		retcount, retbuf, count);
+}
 
-	if (rdbuf->used >= rdbuf->recvd) {
-		int err = transact(Treaddir, "dqd", "dB",
-			rdbuf->fid, rdbuf->nextRequest, rdbuf->size,
-			&rdbuf->recvd, rdbuf->data, rdbuf->size);
-
-		if (err) return err;
-
-		rdbuf->used = 0;
-
-		if (rdbuf->recvd == 0) return -1;
-	}
-
+void DirRecord9(char **buffer, struct Qid9 *retqid, uint64_t *retoffset, char *rettype, char retname[MAXNAME]) {
 	// qid field at +0
 	if (retqid) {
-		*retqid = READQID(rdbuf->data + rdbuf->used);
+		*retqid = READQID(*buffer);
 	}
 
 	// offset field at +13
-	rdbuf->nextRequest = READ64LE(rdbuf->data + rdbuf->used + 13);
+	if (retoffset) {
+		*retoffset = READ64LE(*buffer + 13);
+	}
 
 	// type field at +21
 	if (rettype) {
-		*rettype = *(rdbuf->data + rdbuf->used + 21);
+		*rettype = *(*buffer + 21);
 	}
 
 	// name field at +22
-	uint16_t nlen = READ16LE(rdbuf->data + rdbuf->used + 22);
+	uint16_t nlen = READ16LE(*buffer + 22);
 
 	if (retname) {
 		uint16_t copylen = nlen;
-		if (copylen > 511) copylen = 511;
-		memcpy(retname, rdbuf->data + rdbuf->used + 24, copylen);
+		if (copylen > MAXNAME) copylen = 0; // too-long names get reduced to zero
+		memcpy(retname, *buffer + 24, copylen);
 		retname[copylen] = 0;
 	}
 
-	rdbuf->used += 24 + nlen;
-
-	return 0;
+	*buffer += 24 + nlen;
 }
 
 int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret) {

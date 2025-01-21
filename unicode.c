@@ -12,49 +12,31 @@
 /*
 char * means UTF-8
 unsigned char * means Mac Roman
-
-TODO:
-Preserve file extensions
-Represent unknown chars with fewer than one-per-UTF8-byte "?"s
 */
 
 static int toMacRoman(const char **utf8);
 
+// Does colon-to-slash conversion
+// If the name fails conversion then return the empty string
 void mr31name(unsigned char *roman, const char *utf8) {
-	const char *this = utf8;
-	int badchar = 0, incomplete = 1;
+	const char *next = utf8;
 
 	roman[0] = 0;
 	while (roman[0] < 31) {
-		int ch = toMacRoman(&this); // increments this
-		if (ch < 0) {
-			roman[++(roman[0])] = '?';
-			badchar = 1;
+		int ch = toMacRoman(&next); // increments this
+		if (ch == 0) { // end of string
+			return;
+		} else if (ch < 0) { // not representable
+			roman[0] = 0;
+			return;
 		} else if (ch == ':') {
 			roman[++(roman[0])] = '/';
-		} else if (ch == 0) {
-			incomplete = 0;
-			break;
-		} else {
+		} else { // ordinary char
 			roman[++(roman[0])] = ch;
 		}
 	}
-
-	// Name overflows or has "?": append hash to distinguish
-	// (cf MacOS appending the CNID to invalid names)
-	if (incomplete || badchar) {
-		uint16_t hash = 0;
-		for (int i=0; utf8[i]!=0; i++) {
-			hash = hash*31 + (unsigned char)utf8[i];
-		}
-
-		// Shorten name if needed to make room for hash
-		if (roman[0] > 26) roman[0] = 26;
-
-		char append[6];
-		sprintf(append, "#%04x", hash);
-		memcpy(roman+1+roman[0], append, 5);
-		roman[0] += 5;
+	if (*next != 0) { // too long
+		roman[0] = 0;
 	}
 }
 

@@ -33,6 +33,7 @@
 #include "patch68k.h"
 #include "profile.h"
 #include "9p.h"
+#include "sortdir.h"
 #include "transport.h"
 #include "unicode.h"
 #include "universalfcb.h"
@@ -55,6 +56,7 @@ enum {
 	FID3,
 	FIDPERSIST,
 	FIDPROFILE,
+	FIDCOUNT,
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 256 * 1024, // large stack bc memory is so hard to allocate
@@ -76,10 +78,10 @@ static void getBootBlocks(void);
 static void useMountTag(const void *conf, char *retname, char *retformat);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid);
+static int16_t countDir(int fid, bool dirOK);
 static void updateKnownLength(struct MyFCB *fcb, int32_t length);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
-static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
@@ -568,24 +570,9 @@ static OSErr fsGetVolInfo(struct XVolumeParam *pb) {
 		if (wdcb) cnid = wdcb->wdDirID;
 	}
 
-	// Count contained files
-	pb->ioVNmFls = 0;
-
 	int err = CatalogWalk(FID1, cnid, NULL, NULL, NULL);
 	if (err < 0) return err;
-
-	if (Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
-
-	char scratch[4096];
-	InitReaddir9(FID1, scratch, sizeof scratch);
-
-	char type;
-	char childname[MAXNAME];
-	while (Readdir9(scratch, NULL, &type, childname) == 0) {
-		if (visName(childname) && type != 4 /*not folder*/) pb->ioVNmFls++;
-	}
-
-	vcb.vcbNmFls = pb->ioVNmFls;
+	vcb.vcbNmFls = pb->ioVNmFls = countDir(FID1, false);
 
 	return noErr;
 }
@@ -632,52 +619,10 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	char name[MAXNAME];
 
 	if (idx > 0) { // DIRID + INDEX
-		// Software commonly calls with index 1, 2, 3 etc
-		// Cache Readdir9 to avoid quadratically relisting the directory per-call
-		// An improvement might be to have multiple caches,
-		// but relists aren't a big contributor to boot time
-		static char scratch[2048];
-		static long lastCNID;
-		static int lastIdx;
-
-		// Invalidate the cache (by setting lastCNID to 0)
-		if (cnid != lastCNID || idx <= lastIdx) {
-			lastCNID = 0;
-			lastIdx = 0;
-			if (IsErr(CatalogWalk(FIDPERSIST, cnid, NULL, NULL, NULL))) return fnfErr;
-			if (Lopen9(FIDPERSIST, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
-			InitReaddir9(FIDPERSIST, scratch, sizeof scratch);
-			lastCNID = cnid;
-		}
-
-		struct Qid9 qid;
-
-		// Fast-forward
-		while (lastIdx < idx) {
-			char type;
-			int err = Readdir9(scratch, &qid, &type, name);
-			qid = qidTypeFix(qid, type);
-
-			if (err) {
-				lastCNID = 0;
-				Clunk9(FIDPERSIST);
-				return fnfErr;
-			}
-
-			// GetFileInfo/HGetFileInfo ignores child directories
-			// Note that Rreaddir does return a qid, but the type field of that
-			// qid is unpopulated. So we use the Linux-style type byte instead.
-			if ((!catalogCall && type == 4) || !visName(name)) {
-				continue;
-			}
-
-			lastIdx++;
-		}
-
 		parent = cnid;
-		cnid = QID2CNID(qid);
-		CatalogSet(cnid, parent, name, true/*definitive case*/);
-		WalkPath9(FIDPERSIST, FID1, name);
+		cnid = ReadDirSorted(FID1, cnid, idx, catalogCall, name);
+		if (IsErr(cnid)) return cnid;
+		CatalogSet(cnid, parent, name, true);
 	} else if (idx == 0) { // DIRID + PATH
 		cnid = CatalogWalk(FID1, cnid, pb->ioNamePtr, &parent, name);
 		if (IsErr(cnid)) return cnid;
@@ -702,19 +647,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 }
 
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const char *name, uint32_t fid) {
-	// 9P/Unix lack a call to count the contents of a directory, so list it
-	int valence=0;
-	char childname[MAXNAME];
-	char scratch[4096];
-
-	WalkPath9(fid, FID1, "");
-	Lopen9(FID1, O_RDONLY|O_DIRECTORY, NULL, NULL);
-	InitReaddir9(FID1, scratch, sizeof scratch);
-	while (Readdir9(scratch, NULL, NULL, childname) == 0 && valence < 0x7fff) {
-		if (visName(childname)) valence++;
-	}
-	Clunk9(FID1);
-
 	struct MFAttr attr;
 	MF.DGetAttr(cnid, fid, name, MF_FINFO, &attr);
 
@@ -725,7 +657,7 @@ static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, int32_t pcnid, const 
 	pb->ioFlAttrib = ioDirMask;
 	memcpy(&pb->ioDrUsrWds, attr.finfo, sizeof pb->ioDrUsrWds);
 	pb->ioDrDirID = cnid;
-	pb->ioDrNmFls = valence;
+	pb->ioDrNmFls = countDir(fid, true);
 	pb->ioDrCrDat = pb->ioDrMdDat = mactime(attr.unixtime);
 	memcpy(&pb->ioDrFndrInfo, attr.fxinfo, sizeof pb->ioDrFndrInfo);
 	pb->ioDrParID = pcnid;
@@ -766,6 +698,28 @@ static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, int32_t pcnid, con
 	memset((char *)pb + 80, 0, 108 - 80);
 	memcpy(&pb->ioFlXFndrInfo, attr.fxinfo, sizeof pb->ioFlXFndrInfo);
 	pb->ioFlParID = pcnid;
+}
+
+static int16_t countDir(int fid, bool dirOK) {
+	char scratch[40000];
+	uint64_t magic = 0;
+	uint32_t bytes = 0;
+	int16_t n = 0;
+	WalkPath9(fid, FIDCOUNT, "");
+	if (Lopen9(FIDCOUNT, O_RDONLY|O_DIRECTORY, NULL, NULL)) return 0;
+	while (Readdir9(FIDCOUNT, magic, sizeof scratch, &bytes, scratch), bytes>0) {
+		char *ptr = scratch;
+		while (ptr < scratch + bytes) {
+			char type = 0;
+			char childname[MAXNAME] = "";
+			DirRecord9(&ptr, NULL, &magic, &type, childname);
+			if (visName(childname) && (dirOK || type!=4)) n++;
+			if (n == 0x7fff) goto done;
+		}
+	}
+done:
+	Clunk9(FIDCOUNT);
+	return n;
 }
 
 // Set creator and type on files only
@@ -1373,15 +1327,6 @@ static struct WDCBRec *findWD(short refnum) {
 	} else {
 		return NULL;
 	}
-}
-
-static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
-	if (linuxType == 4) {
-		qid.type = 0x80;
-	} else {
-		qid.type = 0;
-	}
-	return qid;
 }
 
 static struct DrvQEl *findDrive(short num) {
