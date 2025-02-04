@@ -423,6 +423,15 @@ int Fsync9(uint32_t fid) {
 		fid);
 }
 
+int Lock9(uint32_t fid, uint8_t type, uint32_t flags, uint64_t start, uint64_t length, uint32_t procid, const char *clientid, uint8_t *retstatus) {
+	enum {Tfsync = 52}; // size[4] Tlock tag[2] fid[4] type[1] flags[4] start[8] length[8] proc_id[4] client_id[s]
+	enum {Rfsync = 53}; // size[4] Rlock tag[2] status[1]
+
+	return transact(Tfsync, "dbdqqds", "b",
+		fid, type, flags, start, length, procid, clientid,
+		retstatus);
+}
+
 /*
 letter |  Tx  |  Rx  | Tx args      | Rx args       | comment
 b         ok     ok    uint8_t        uint8_t *       byte

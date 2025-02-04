@@ -244,3 +244,4 @@ int Clunk9(uint32_t fid);
 int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Write9(uint32_t fid, const void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Fsync9(uint32_t fid);
+int Lock9(uint32_t fid, uint8_t type, uint32_t flags, uint64_t start, uint64_t length, uint32_t procid, const char *clientid, uint8_t *retstatus);
