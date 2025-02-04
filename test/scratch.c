@@ -45,9 +45,6 @@ long MkScratchTree(const char *spec) {
 		printf("# Scratch tree = %s\n", spec);
 		strcpy(old, spec);
 	}
-	short vol; // the root of the volume containing the app
-	long nonsense;
-	HGetVol(NULL, &vol, &nonsense);
 
 	long trail[10] = {2}; // 2 means root directory
 	int n = 1;
@@ -56,6 +53,7 @@ long MkScratchTree(const char *spec) {
 	bool first = true;
 
 	closeAllWDs();
+	SetVol(NULL, vol);
 	trackCount = 0;
 	tracked[trackCount++] = (struct trackedFile){.id=0, .wd=0, .name="zero"};
 	tracked[trackCount++] = (struct trackedFile){.id=1, .wd=5555, .name="uber"}; // "parent of root"
