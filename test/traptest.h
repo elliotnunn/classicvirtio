@@ -10,3 +10,7 @@ enum {
 };
 
 void TrapTest(uint32_t trapnum, ...);
+void *GetFieldPtr(int field);
+uint32_t GetField32(int field);
+uint16_t GetField16(int field);
+uint8_t GetField8(int field);

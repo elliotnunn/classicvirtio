@@ -16,6 +16,16 @@ const char *PosModeName(char mode) {
 	}
 }
 
+const char *PermissionName(char mode) {
+	switch (mode) {
+	case 0: return "fsCurPerm";
+	case 1: return "fsRdPerm";
+	case 2: return "fsWrPerm";
+	case 3: return "fsRdWrPerm";
+	case 4: return "fsRdWrShPerm";
+	default: return "unknown";
+	}
+}
 const char *ErrName(short err) {
 	switch (err) {
 		case 0: return "noErr";
@@ -286,3 +296,4 @@ const char *TrapName(uint32_t trap) {
 	default: return "unknown";
 	}
 }
+

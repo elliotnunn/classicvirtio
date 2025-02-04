@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 const char *PosModeName(char mode);
+const char *PermissionName(char mode);
 const char *ErrName(short err);
 const char *FieldName(int fieldCode);
 const char *TrapName(uint32_t trap);

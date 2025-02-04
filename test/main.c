@@ -23,6 +23,7 @@ void testNavigation(void);
 void testSetFPos(void);
 void testRead(void);
 void testWrite(void);
+void testOpenPerms(void);
 
 static void shutDownIfOnlyApp(void) {
 	fflush(stdout);
@@ -41,6 +42,7 @@ int main(void) {
 	testSetFPos();
 	testRead();
 	testWrite();
+	testOpenPerms();
 
 	TAPPlan();
 	return 0;

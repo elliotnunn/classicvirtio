@@ -218,6 +218,11 @@ static void rmdir(short vol, long dir) {
 			HFileInfo pb = {.ioVRefNum=vol, .ioDirID=todelete[i], .ioNamePtr=name, .ioFDirIndex=1};
 			if (PBGetCatInfoSync((void *)&pb)) break;
 
+			if (pb.ioFRefNum != 0) { // it's still open
+				FSClose(pb.ioFRefNum);
+				continue;
+			}
+
 			pb.ioDirID = todelete[i];
 			if (PBHDeleteSync((void *)&pb)) TAPBailOut("failed to delete file");
 		}

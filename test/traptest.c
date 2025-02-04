@@ -24,11 +24,14 @@ enum {
 	CNID,
 	VREFNUM,
 	ERR,
+	PERM,
 };
 
 struct field {
 	uint8_t size, offset, special;
 };
+
+char PB[128] __attribute__((aligned(4)));
 
 static const struct field fields[] = {
 	[ioResult]       = { 2, 0x10, ERR},
@@ -42,7 +45,7 @@ static const struct field fields[] = {
 	[ioFVersNum]     = { 1, 0x1a},
 	[ioVersNum]      = { 1, 0x1a},
 	[ioWDIndex]      = { 2, 0x1a},
-	[ioPermssn]      = { 1, 0x1b},
+	[ioPermssn]      = { 1, 0x1b, PERM},
 	[ioFCBIndx]      = { 4, 0x1c},
 	[ioFDirIndex]    = { 2, 0x1c},
 	[ioNewName]      = { 4, 0x1c, STRING},
@@ -157,9 +160,9 @@ static void printpb(void *pb, const char *prefix) {
 
 // TrapTest(_GetVol, ioNamePtr, "something", NULL, ioResult, 0, NULL); // need to extend for return values
 void TrapTest(uint32_t trapnum, ...) {
-	char pb[128] __attribute__((aligned(4))) = {};
 	unsigned char strings[1024];
 	int strbytes = 0;
+	memset(PB, 0, sizeof PB);
 
 	// Populate parameter block
 	va_list va;
@@ -198,18 +201,21 @@ void TrapTest(uint32_t trapnum, ...) {
 			char *s = va_arg(va, char *);
 			setto = ScratchWD(s);
 			rep += sprintf(rep, "=WD(%s)", s);
+		} else if (f.special == PERM) {
+			setto = va_arg(va, int); // ever actually happen?
+			rep += sprintf(rep, "=%s", PermissionName(setto));
 		} else {
 			TAPBailOut("bad code");
 		}
 
-		memcpy(pb+f.offset, (char *)&setto+4-f.size, f.size); // big endian field set
+		memcpy(PB+f.offset, (char *)&setto+4-f.size, f.size); // big endian field set
 	}
 	rep = stpcpy(rep, ") = (");
 
 	// Call the trap synchronously
-	if (0) printpb(pb, "#  -> ");
-	trap(pb, (uint16_t)(trapnum>>16), (uint16_t)trapnum);
-	if (0) printpb(pb, "# <-  ");
+	if (0) printpb(PB, "#  -> ");
+	trap(PB, (uint16_t)(trapnum>>16), (uint16_t)trapnum);
+	if (0) printpb(PB, "# <-  ");
 
 	// Check the parameter block against expected values
 	char complaints[1024] = "";
@@ -227,7 +233,7 @@ void TrapTest(uint32_t trapnum, ...) {
 		int32_t got = 0; // read the field from the PB (could be a string pointer)
 		for (int i=0; i<f.size; i++) {
 			got = (uint32_t)got << 8; // avoid undefined bitshift
-			got |= (uint8_t)pb[f.offset+i];
+			got |= (uint8_t)PB[f.offset+i];
 		}
 		uint32_t signbit = 1ULL<<(f.size*8-1);
 		got = ((uint32_t)got^signbit) - signbit; // sign-extend
@@ -279,4 +285,26 @@ void TrapTest(uint32_t trapnum, ...) {
 		printf("# actually got: (%s)\n", complaints+1);
 	}
 	va_end(va);
+}
+
+void *GetFieldPtr(int field) {
+	void *buf;
+	memcpy(&buf, PB+fields[field].offset, 4);
+	return buf;
+}
+
+uint32_t GetField32(int field) {
+	uint32_t buf;
+	memcpy(&buf, PB+fields[field].offset, 4);
+	return buf;
+}
+
+uint16_t GetField16(int field) {
+	uint16_t buf;
+	memcpy(&buf, PB+fields[field].offset, 2);
+	return buf;
+}
+
+uint8_t GetField8(int field) {
+	return PB[fields[field].offset];
 }
