@@ -831,13 +831,33 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	if (IsErr(cnid)) return cnid;
 	if (IsDir(cnid)) return fnfErr;
 
+	// Does not account for locked files (in the sense of SetFilLock/RstFilLock)
+	// Does not account for two VMs sharing the same file (need advisory locks for this)
+	if (pb->ioPermssn<0 || pb->ioPermssn>4) {
+		return paramErr;
+	}
+	for (struct MyFCB *sib=UnivFirst(cnid, (pb->ioTrap&0xff) == (_OpenRF&0xff)); sib!=NULL; sib=UnivNext(sib)) {
+		if (pb->ioPermssn==fsCurPerm || pb->ioPermssn==fsWrPerm || pb->ioPermssn==fsRdWrPerm) {
+			if (sib->fcbFlags&fcbWriteMask) {
+				goto returnExistingNum;
+			}
+		} else if (pb->ioPermssn==fsRdWrShPerm) {
+			if ((sib->fcbFlags&fcbWriteMask) && !(sib->fcbFlags&fcbSharedWriteMask)) {
+			returnExistingNum:
+				pb->ioRefNum = sib->refNum;
+				return opWrErr;
+			}
+		}
+	}
+
 	struct MFAttr attr = {};
 	MF.FGetAttr(cnid, FID1, name, MF_FINFO, &attr);
 
 	fcb->fcbFlNm = cnid;
 	fcb->fcbFlags =
 		(fcbResourceMask * ((pb->ioTrap&0xff)==(_OpenRF&0xff))) |
-		(fcbWriteMask * (pb->ioPermssn != fsRdPerm));
+		(fcbWriteMask * (pb->ioPermssn != fsRdPerm)) |
+		(fcbSharedWriteMask * (pb->ioPermssn == fsRdWrShPerm));
 	fcb->fcbVPtr = &vcb;
 	fcb->fcbClmpSize = 512;
 	fcb->fcbDirID = parent;
